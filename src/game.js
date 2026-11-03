@@ -16,9 +16,9 @@ export class Game {
     Object.assign(this, { renderer, scene, camera, audio, ui, fx, settings });
     this.M = buildMaterials(renderer);
     initRobotAssets(this.M, faceTextures());
-    scene.fog = new THREE.FogExp2(0x000000, 0.045);
-    scene.background = new THREE.Color(0x000000);
-    scene.add(new THREE.HemisphereLight(0x2a3440, 0x0b0907, 0.4));
+    scene.fog = new THREE.FogExp2(0x0b0a09, 0.032);
+    scene.background = new THREE.Color(0x0b0a09);
+    scene.add(new THREE.HemisphereLight(0x8a90a0, 0x2a2420, 1.1)); // 外から漏れる薄明かり
     this.exposure = 1.1;
 
     // 懐中電灯: カメラに遅れて追従するリグ
@@ -32,7 +32,8 @@ export class Game {
     this.rig.add(fl, tgt); fl.target = tgt;
     this.flash = fl; this.flashBase = 120; this.flickT = 0;
     this.bounce = new THREE.PointLight(0xffe2c0, 0, 7, 2); scene.add(this.bounce);
-    this.fixLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xdde6ff, 0, 10, 2); scene.add(l); return l; });
+    // 生きている蛍光灯のうちプレイヤーに近いものへ割り当てる（ライト数固定でシェーダ再コンパイルを避ける）
+    this.fixLights = Array.from({ length: 6 }, () => { const l = new THREE.PointLight(0xdde6ff, 0, 15, 2); scene.add(l); return l; });
     this._makeDust();
     this.applyQuality();
 
@@ -136,8 +137,7 @@ export class Game {
         this.robots.push(r);
       }
     }
-    lv.lightSpots.forEach((s) => { s.off = 0; s.mode = Math.random() < 0.34 ? 'dead' : 'live'; });
-    this.audio.setBuzz(lv.lightSpots);
+    lv.lightSpots.forEach((s) => { s.off = 0; s.v = 1; s.mode = Math.random() < 0.25 ? 'dead' : 'live'; });
     const codeInfo = this.codes[n] ? (st.known ? '（コード記憶済み ' + this.codes[n] + '）' : '／上り階段は暗証番号が必要') : '';
     this.ui.say((arrival ? '→ ' : '') + FLOORS[n].name + codeInfo);
   }
@@ -214,23 +214,27 @@ export class Game {
   }
 
   updateLights(dt) {
-    const lv = this.level;
-    for (let i = 0; i < 3; i++) {
-      const L = this.fixLights[i], s = lv.lightSpots[i];
-      if (!s) { L.intensity = 0; continue; }
-      L.position.set(s.x, s.y, s.z);
+    const lv = this.level, p = this.player, spots = lv.lightSpots;
+    for (const s of spots) {
       let v;
       if (s.mode === 'dead') {
         if (s.off > 0) s.off -= dt; else if (Math.random() < dt * 0.25) s.off = 0.08 + Math.random() * 0.5;
         v = s.off > 0 && Math.random() < 0.6 ? 1 : 0;
       } else {
-        if (s.off > 0) s.off -= dt; else if (Math.random() < dt * 0.7) s.off = 0.04 + Math.random() * 0.3;
+        if (s.off > 0) s.off -= dt; else if (Math.random() < dt * 0.3) s.off = 0.04 + Math.random() * 0.25;
         v = s.off > 0 ? (Math.random() < 0.35 ? 1 : 0) : 1;
       }
-      L.intensity = v * 5;
-      s.mat.color.setScalar(v ? 2.2 : 0.04);
-      if (this.audio.buzz[i]) this.audio.buzz[i].set(v);
+      if (v !== s.v) { s.v = v; s.mat.color.setScalar(v ? 2.2 : 0.04); }
+      s.d = (s.x - p.x) ** 2 + (s.z - p.z) ** 2;
     }
+    const near = spots.slice().sort((a, b) => a.d - b.d);
+    this.fixLights.forEach((L, i) => {
+      const s = near[i];
+      if (!s) { L.intensity = 0; return; }
+      L.position.set(s.x, s.y, s.z);
+      L.intensity = s.v * 9;
+    });
+    this.audio.updateBuzz(near.slice(0, 3));
   }
 
   updateCamera(dt) {
@@ -250,7 +254,7 @@ export class Game {
     this.bounce.intensity = on ? 0.35 : 0;
     // 明順応: ライトが照らす面までの距離で露出を調整（至近の白飛びを防ぐ）
     const d = on ? this.viewDistance(_fwd) : 8;
-    const target = on ? clamp(0.09 * Math.pow(d, 1.6), 0.1, 1.25) : 1.35;
+    const target = on ? clamp(0.09 * Math.pow(d, 1.6), 0.18, 1.3) : 1.7;
     this.exposure = damp(this.exposure, target, target < this.exposure ? 6 : 1.5, dt);
     this.renderer.toneMappingExposure = this.exposure;
     this.fx.bloom.threshold = 1.1 / this.exposure; // ブルームは露出補正前の値で判定されるため連動させる

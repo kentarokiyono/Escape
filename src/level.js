@@ -446,7 +446,7 @@ function tryBuild(n, ctx, salt) {
       fixtures.push({ x, z, p, i });
     }
   }
-  const live = fixtures.filter((f) => !lv.reserved.has(f.i)).sort(() => R() - 0.5).slice(0, 3);
+  const live = fixtures.filter((f) => !lv.reserved.has(f.i)).sort(() => R() - 0.5).slice(0, Math.max(4, Math.round(fixtures.length * 0.3)));
   for (const f of fixtures) {
     const on = live.includes(f);
     const mat = on ? lv.mat(M.tubeOn.clone()) : M.tubeOff;

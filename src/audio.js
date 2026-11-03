@@ -217,17 +217,23 @@ export class AudioSys {
       o.connect(og); og.connect(g); o.start();
     }
   }
-  // 点滅蛍光灯のジー音（3つ）
-  setBuzz(spots) {
+  // 近くの点滅蛍光灯のジー音（3ボイスを最寄りの照明へ移動）
+  updateBuzz(spots) {
     if (!this.ctx) return;
-    for (const b of this.buzz) b.dispose();
-    this.buzz = spots.map((s) => {
-      const c = this.ctx, p = this.panner(s.x, s.y, s.z, 1.2);
-      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 100;
-      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 240; bp.Q.value = 3;
-      const g = c.createGain(); g.gain.value = 0;
-      o.connect(bp); bp.connect(g); g.connect(p); o.start();
-      return { set: (v) => g.gain.setTargetAtTime(v * 0.05, this.now, 0.02), dispose: () => { o.stop(); o.disconnect(); bp.disconnect(); g.disconnect(); p.disconnect(); } };
+    if (!this.buzz.length) {
+      this.buzz = [0, 1, 2].map(() => {
+        const c = this.ctx, p = this.panner(0, 2.8, 0, 1.2);
+        const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 100;
+        const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 240; bp.Q.value = 3;
+        const g = c.createGain(); g.gain.value = 0;
+        o.connect(bp); bp.connect(g); g.connect(p); o.start();
+        return { p, g };
+      });
+    }
+    this.buzz.forEach((b, i) => {
+      const s = spots[i];
+      if (s) this.setPos(b.p, s.x, s.y, s.z, false);
+      b.g.gain.setTargetAtTime(s ? s.v * 0.04 : 0, this.now, 0.02);
     });
   }
 
