@@ -70,8 +70,11 @@ export class Player {
     this.vx = damp(this.vx, dx * sp, 10, dt); this.vz = damp(this.vz, dz * sp, 10, dt);
     if (!this.falling) {
       const nx = this.x + this.vx * dt, nz = this.z + this.vz * dt;
-      if (ph.canMove(nx, this.z, this.r, o)) this.x = nx; else this.vx = 0;
-      if (ph.canMove(this.x, nz, this.r, o)) this.z = nz; else this.vz = 0;
+      // 既に障害物に食い込んでいる場合は、めり込みが浅くなる方向への移動だけ許す
+      const stuck = ph.collide(this.x, this.z, this.r, o);
+      const ok = (x, z) => (stuck ? ph.clearance(x, z, this.r, o) > ph.clearance(this.x, this.z, this.r, o) - 1e-4 && ph.canMove(x, z, 0.05, o) : ph.canMove(x, z, this.r, o));
+      if (ok(nx, this.z)) this.x = nx; else this.vx = 0;
+      if (ok(this.x, nz)) this.z = nz; else this.vz = 0;
     }
     // 床の高さ・落下
     const center = ph.groundAt(this.x, this.z);

@@ -238,7 +238,7 @@ export function buildMapLevel(id, def, M, st, opts = {}) {
       lv.breaker.on = lv.power;
     } else if (ch === 'F' || (marks[ch] && marks[ch].kind === 'lift')) {
       const conf = ch === 'F' ? lifts.F || {} : marks[ch];
-      const L = b.lift(x, z, awayRy(c, r), { id: conf.id, label: conf.label });
+      const L = b.lift(x, z, awayRy(c, r), { id: conf.id, label: conf.label, noShaft: true });
       Object.assign(L, { to: conf.to || null, at: conf.at || null, need: conf.need || null });
       lv.markers[conf.id] = { x, z, y, yaw: awayRy(c, r) + Math.PI };
     } else if (ch === 'x') {
