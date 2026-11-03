@@ -114,6 +114,21 @@ export class Physics {
       return Physics.hit(c, x, z, r);
     });
   }
+  // 周囲の障害物までの最短距離（めり込み脱出用）
+  clearance(x, z, r, o = {}) {
+    const y = o.y ?? 0, body = o.robot ? BODY.robot : o.crouch ? BODY.crouch : BODY.player;
+    let best = 9;
+    this._each(x - r - 1, z - r - 1, x + r + 1, z + r + 1, (c) => {
+      if (!c.on || (c.mask === 'robot' && !o.robot) || (c.mask === 'stand' && !o.robot && o.crouch)) return false;
+      if (c.mask !== 'stand' && (c.top <= y + 0.05 || c.y0 >= y + body)) return false;
+      let d;
+      if (c.cr !== undefined) d = Math.hypot(x - c.x, z - c.z) - c.cr;
+      else { const cx = Math.max(c.minX, Math.min(x, c.maxX)), cz = Math.max(c.minZ, Math.min(z, c.maxZ)); d = Math.hypot(x - cx, z - cz); }
+      if (d < best) best = d;
+      return false;
+    });
+    return best;
+  }
   // ダクト（しゃがみ通路）の中か
   inCrawl(x, z) {
     return this._each(x - 0.01, z - 0.01, x + 0.01, z + 0.01, (c) => c.on && c.mask === 'stand' && Physics.hit(c, x, z, 0.01));

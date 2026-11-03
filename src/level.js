@@ -490,15 +490,18 @@ export class Builder {
     const M = this.M, fx = Math.sin(ry), fz = Math.cos(ry), y = o.y || 0;
     const cx = x - fx * 1.6, cz = z - fz * 1.6, s = o.size ?? 2.0;
     const p = P(cx, cz, ry, y);
-    this.put(M.concrete, M.concreteScale, xform(new THREE.BoxGeometry(s + 0.4, this.lv.wallH, s + 0.4), p, 0, this.lv.wallH / 2, 0));
-    this.lv.phys.addBox(cx, cz, (s + 0.4) / 2, (s + 0.4) / 2, this.lv.wallH, { y0: y });
-    this.put(M.steel, M.steelScale, xform(new THREE.BoxGeometry(s * 0.8, 2.1, 0.05), p, 0, 1.05, (s + 0.4) / 2 + 0.02));
-    this.put(M.dark, 0, xform(new THREE.BoxGeometry(0.02, 2.1, 0.06), p, 0, 1.05, (s + 0.4) / 2 + 0.03));
+    if (!o.noShaft) { // 文字マップでは壁でシャフトを描くので不要
+      this.put(M.concrete, M.concreteScale, xform(new THREE.BoxGeometry(s + 0.4, this.lv.wallH, s + 0.4), p, 0, this.lv.wallH / 2, 0));
+      this.lv.phys.addBox(cx, cz, (s + 0.4) / 2, (s + 0.4) / 2, this.lv.wallH, { y0: y });
+    }
+    const face = o.noShaft ? 1.6 - 0.52 : (s + 0.4) / 2; // 扉面の位置
+    this.put(M.steel, M.steelScale, xform(new THREE.BoxGeometry(s * 0.8, 2.1, 0.05), p, 0, 1.05, face + 0.02));
+    this.put(M.dark, 0, xform(new THREE.BoxGeometry(0.02, 2.1, 0.06), p, 0, 1.05, face + 0.03));
     const panelMat = this.lv.mat(M.ledRed.clone());
     const pn = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.2, 0.03), panelMat);
-    pn.position.set(cx + fx * ((s + 0.4) / 2 + 0.03) + Math.cos(ry) * (s * 0.5), y + 1.25, cz + fz * ((s + 0.4) / 2 + 0.03) - Math.sin(ry) * (s * 0.5));
+    pn.position.set(cx + fx * (face + 0.03) + Math.cos(ry) * (s * 0.5), y + 1.25, cz + fz * (face + 0.03) - Math.sin(ry) * (s * 0.5));
     pn.rotation.y = ry; this.lv.group.add(pn);
-    this.sign(o.label || '配膳リフト', '#1c1c1c', '#d8d8d8', cx + fx * ((s + 0.4) / 2 + 0.03), y + 2.35, cz + fz * ((s + 0.4) / 2 + 0.03), ry, 0.9, 0.24);
+    this.sign(o.label || '配膳リフト', '#1c1c1c', '#d8d8d8', cx + fx * (face + 0.03), y + 2.35, cz + fz * (face + 0.03), ry, 0.9, 0.24);
     const it = { kind: 'lift', id: o.id || 'lift', x, z, y, r: 1.4, ry, panelMat, label: o.label || '配膳リフト', dir: o.dir || 0 };
     this.lv.lifts.push(it); this.lv.interacts.push(it);
     return it;
