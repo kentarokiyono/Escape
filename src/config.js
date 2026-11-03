@@ -1,13 +1,12 @@
 // ゲーム全体の定数
 export const RX = 40;          // フロア半幅 (x: -RX..RX)
 export const RZ = 80;          // フロア半奥行 (z: -RZ..RZ)
-export const WALL_H = 3;       // 天井高
 export const GRID = 0.5;       // ナビ/視線グリッド解像度
 export const TOP_FLOOR = 5;
 
 // theme: 小物の種類 / door: 扉幅 / open: 壁ごと撤去する確率 / maze: 迷路化
 export const FLOORS = {
-  1: { cols: 4, rows: 8,  name: '1F 元メインフロア', theme: 'hall',    door: 5.0, open: 0.45, maze: false },
+  1: { cols: 4, rows: 8,  name: '1F 元メインフロア', theme: 'hall',    door: 5.0, open: 0.45, maze: false, wallH: 5.5 },
   2: { cols: 6, rows: 12, name: '2F 元個室フロア',   theme: 'private', door: 2.0, open: 0,    maze: false },
   3: { cols: 8, rows: 16, name: '3F 元宴会フロア',   theme: 'banquet', door: 2.0, open: 0,    maze: true  },
   4: { cols: 5, rows: 10, name: '4F 元厨房',         theme: 'kitchen', door: 2.4, open: 0.1,  maze: false },

@@ -1,10 +1,13 @@
 import * as THREE from 'three';
-import { Game, randomSeed } from './game.js';
+import { Game } from './game.js';
 import { AudioSys } from './audio.js';
 import { UI } from './ui.js';
 import { PostFX } from './postfx.js';
 import { storage, fmtTime } from './util.js';
 import { STORAGE_KEYS } from './config.js';
+import { FreeMode } from './modes/free.js';
+import { StoryMode, UNLOCK_KEY } from './modes/story.js';
+import { RobotMode } from './modes/robot.js';
 
 const settings = Object.assign({ sens: 1, vol: 0.8, quality: 'high' }, storage.get(STORAGE_KEYS.settings, {}));
 const ui = new UI();
@@ -30,6 +33,20 @@ const fx = new PostFX(renderer, scene, camera);
 let game;
 const params = new URLSearchParams(location.search);
 const urlSeed = params.has('seed') ? Number(params.get('seed')) >>> 0 : null;
+const randomSeed = () => (Math.random() * 1e9) >>> 0;
+
+const app = {
+  startFree(seed) { stop(); game.setMode(new FreeMode(game, app, seed ?? urlSeed ?? randomSeed())); game.mode.start(); },
+  startStory(cont) { stop(); game.setMode(new StoryMode(game, app, cont)); game.mode.start(); },
+  startRobot() { stop(); game.setMode(new RobotMode(game, app)); game.mode.start(); },
+  showTitle,
+};
+function stop() {
+  ui.clearSubtitles(); game.closeDoc(); ui.radar(false); ui.robotFace(false);
+  fx.u.robo.value = 0; fx.u.caught.value = 0;
+  if (game.state === 'monitor') game.exitMonitor();
+  game.mapOpen = false; ui.e.map.classList.add('hide');
+}
 
 function bindSettings() {
   const sens = document.getElementById('sens'), vol = document.getElementById('vol'), q = document.getElementById('quality');
@@ -42,21 +59,26 @@ function bindSettings() {
 }
 
 function showTitle() {
-  const best = storage.get(STORAGE_KEYS.best, null);
+  if (game && game.state !== 'title') { stop(); document.exitPointerLock(); }
+  if (game) game.state = 'menu';
+  const best = storage.get(STORAGE_KEYS.best, null), un = storage.get(UNLOCK_KEY, {});
+  const ends = ['normal', 'true', 'ura'].filter((k) => un[k]).length;
   ui.showHud(false);
   ui.overlay({
     title: 'お席へご案内します ―廃墟階―',
-    body: '<p>閉店から10年。元ファミレスの廃ビル。給仕ロボットは今も“営業中”。<br>' +
-      '<b>5F のマスターキー</b>を取り、<b>1F の脱出口</b>から逃げろ。2F〜4F の上り階段は床の黄色いメモにある暗証番号が必要。</p>' +
+    body: '<p>閉店から10年。元ファミレスのビルで、給仕ロボットは今も“営業中”。</p>' +
       '<table class="keys">' +
       '<tr><th>マウス</th><td>視点</td><th>WASD</th><td>移動</td></tr>' +
-      '<tr><th>Shift</th><td>ダッシュ（スタミナ）</td><th>C</th><td>しゃがむ（静か・見つかりにくい）</td></tr>' +
-      '<tr><th>E</th><td>調べる / 隠れる / 階段 / 囮</td><th>F</th><td>ライト ON/OFF</td></tr>' +
+      '<tr><th>Shift</th><td>ダッシュ（スタミナ）</td><th>C</th><td>しゃがむ（静か・ダクトを通れる）</td></tr>' +
+      '<tr><th>E</th><td>調べる / 隠れる / 操作</td><th>F</th><td>ライト ON/OFF</td></tr>' +
       '<tr><th>M</th><td>マップ</td><th>Esc</th><td>一時停止</td></tr></table>' +
-      '<p class="dim">足音は聞かれる。ライトは遠くからも見える。テーブルの陰はしゃがめば視線を切れる。ヘッドホン推奨。' +
-      (best != null ? '<br>ベストタイム ' + fmtTime(best) : '') + '</p>',
+      '<p class="dim">足音は聞かれる。ライトは遠くからも見える。監視カメラに映ると呼ばれる。ロボットは段差を越えられない。ヘッドホン推奨。<br>' +
+      (best != null ? 'フリー ベスト ' + fmtTime(best) + '　' : '') + 'エンディング ' + ends + ' / 3</p>',
     buttons: [
-      { label: 'はじめる', primary: true, onClick: () => game.start(urlSeed ?? randomSeed()) },
+      ...(StoryMode.hasSave() ? [{ label: 'ストーリー：つづきから', primary: true, onClick: () => app.startStory(true) }] : []),
+      { label: 'ストーリー：はじめから', primary: !StoryMode.hasSave(), onClick: () => app.startStory(false) },
+      { label: 'フリーモード（自動生成）', onClick: () => app.startFree(null) },
+      { label: un.robot ? 'ロボットモード' : 'ロボットモード（？？？）', disabled: !un.robot && !params.has('robot'), onClick: () => app.startRobot() },
     ],
     settings: true,
   });
@@ -64,8 +86,10 @@ function showTitle() {
 
 function init() {
   game = new Game({ renderer, scene, camera, audio, ui, fx, settings });
-  game.newRun(urlSeed ?? randomSeed());
-  if (params.has('debug')) window.game = game;
+  game.setMode(new FreeMode(game, app, urlSeed ?? randomSeed()));
+  game.mode.newRun(); // タイトルの背景として生成
+  game.state = 'menu';
+  if (params.has('debug')) { window.game = game; window.app = app; }
   bindSettings();
   ui.loading('');
   showTitle();
@@ -81,6 +105,12 @@ addEventListener('keydown', (e) => {
     else if (e.key === 'Enter') game.codeSubmit(true);
     else if (e.key === 'Escape') game.codeCancel(false);
     e.preventDefault();
+    return;
+  }
+  if (game.state === 'monitor') {
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') game.cycleMonitor(-1);
+    else if (e.code === 'KeyD' || e.code === 'ArrowRight') game.cycleMonitor(1);
+    else if (e.code === 'KeyE') game.exitMonitor();
     return;
   }
   if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
@@ -111,6 +141,7 @@ function loop(ts) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, Math.max(0, (ts - last) / 1000));
   last = ts;
+  if (game.state !== 'pause' && game.state !== 'menu') ui.updateSubtitles(dt);
   game.frame(dt);
 }
 

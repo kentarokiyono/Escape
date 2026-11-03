@@ -8,13 +8,13 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const FilmShader = {
   uniforms: {
-    tDiffuse: { value: null }, time: { value: 0 }, fear: { value: 0 }, caught: { value: 0 }, aspect: { value: 1 },
+    tDiffuse: { value: null }, time: { value: 0 }, fear: { value: 0 }, caught: { value: 0 }, aspect: { value: 1 }, robo: { value: 0 }, mon: { value: 0 },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
     void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */`
-    uniform sampler2D tDiffuse; uniform float time, fear, caught, aspect;
+    uniform sampler2D tDiffuse; uniform float time, fear, caught, aspect, robo, mon;
     varying vec2 vUv;
     float h12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
     void main(){
@@ -33,6 +33,14 @@ const FilmShader = {
       float vig = smoothstep(0.95, 0.2, length(c * vec2(aspect, 1.0)) * 0.9);
       col *= mix(0.22, 1.0, vig) * (1.0 - fear * 0.2 * (1.0 - vig));
       col *= 1.0 - 0.06 * sin(vUv.y * 900.0 + time * 30.0) * caught;
+      // ロボット視界: 単色化＋走査線
+      float lr = dot(col, vec3(0.3, 0.59, 0.11));
+      col = mix(col, vec3(0.35, 1.0, 0.95) * pow(lr, 0.8) * 1.3, robo * 0.85);
+      col *= 1.0 - robo * 0.12 * step(0.5, fract(vUv.y * 180.0));
+      // 監視モニター: 粗い単色・ノイズ
+      col = mix(col, vec3(lr * 1.25) * vec3(0.9, 1.0, 0.92), mon);
+      col += mon * (h12(floor(vUv * vec2(320.0, 180.0)) + fract(time * 13.0)) - 0.5) * 0.06;
+      col *= 1.0 - mon * 0.18 * step(0.5, fract(vUv.y * 120.0 + time * 2.0));
       gl_FragColor = vec4(col, 1.0);
     }`,
 };
@@ -40,7 +48,9 @@ const FilmShader = {
 export class PostFX {
   constructor(renderer, scene, camera) {
     this.composer = new EffectComposer(renderer);
-    this.composer.addPass(new RenderPass(scene, camera));
+    this.renderPass = new RenderPass(scene, camera);
+    this.camera = camera;
+    this.composer.addPass(this.renderPass);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.7, 0.5, 1.0);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
@@ -53,5 +63,6 @@ export class PostFX {
     this.composer.setSize(w, h);
     this.u.aspect.value = w / h;
   }
+  setCamera(cam) { this.camera = cam; this.renderPass.camera = cam; }
   render(dt, t) { this.u.time.value = t; this.composer.render(dt); }
 }
