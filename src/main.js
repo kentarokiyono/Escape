@@ -97,8 +97,21 @@ function init() {
 }
 
 // ---------- 入力 ----------
+// プレイ中のキー入力は見えないパスワード欄で受ける（IME がオンでも英字キーとして届く）
+const sink = document.getElementById('keysink');
+const focusSink = () => { if (document.activeElement !== sink) try { sink.focus({ preventScroll: true }); } catch (e) { /* 無視 */ } };
+sink.addEventListener('input', () => { sink.value = ''; });
+// e.code が取れない環境向けに、文字から物理キーを推定する
+const KEYMAP = { w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', e: 'KeyE', f: 'KeyF', m: 'KeyM', c: 'KeyC', ' ': 'Space', Shift: 'ShiftLeft', Escape: 'Escape' };
+const codeOf = (e) => e.code || KEYMAP[e.key] || KEYMAP[(e.key || '').toLowerCase()] || '';
+let imeWarnT = 0;
 addEventListener('keydown', (e) => {
   if (!game) return;
+  if ((e.key === 'Process' || e.keyCode === 229) && !codeOf(e)) {
+    if (performance.now() - imeWarnT > 4000) { imeWarnT = performance.now(); ui.say('日本語入力（IME）をオフにしてください。キー操作が届いていません', 4); }
+    return;
+  }
+  const code = codeOf(e);
   if (game.state === 'code') {
     if (e.key >= '0' && e.key <= '9') game.codeDigit(Number(e.key));
     else if (e.key === 'Backspace') game.codeDel();
@@ -108,19 +121,19 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (game.state === 'monitor') {
-    if (e.code === 'KeyA' || e.code === 'ArrowLeft') game.cycleMonitor(-1);
-    else if (e.code === 'KeyD' || e.code === 'ArrowRight') game.cycleMonitor(1);
-    else if (e.code === 'KeyE') game.exitMonitor();
+    if (code === 'KeyA' || code === 'ArrowLeft') game.cycleMonitor(-1);
+    else if (code === 'KeyD' || code === 'ArrowRight') game.cycleMonitor(1);
+    else if (code === 'KeyE') game.exitMonitor();
     return;
   }
-  if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-  game.keys[e.code] = true;
+  if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) e.preventDefault();
+  game.keys[code] = true;
   if (e.repeat) return;
-  if (e.code === 'KeyE') game.interact();
-  else if (e.code === 'KeyF') game.toggleFlash();
-  else if (e.code === 'KeyM') game.toggleMap();
+  if (code === 'KeyE') game.interact();
+  else if (code === 'KeyF') game.toggleFlash();
+  else if (code === 'KeyM') game.toggleMap();
 });
-addEventListener('keyup', (e) => { if (game) game.keys[e.code] = false; });
+addEventListener('keyup', (e) => { if (game) game.keys[codeOf(e)] = false; });
 addEventListener('blur', () => { if (game) for (const k in game.keys) game.keys[k] = false; });
 addEventListener('mousemove', (e) => {
   if (!game || !game.isLocked() || (game.state !== 'play' && game.state !== 'trans')) return;
@@ -128,7 +141,8 @@ addEventListener('mousemove', (e) => {
   const k = 0.0022 * settings.sens;
   game.player.look(e.movementX * k, e.movementY * k);
 });
-document.addEventListener('pointerlockchange', () => game && game.onLockChange());
+document.addEventListener('pointerlockchange', () => { if (!game) return; if (game.isLocked()) focusSink(); game.onLockChange(); });
+addEventListener('mousedown', () => { if (game && game.isLocked()) focusSink(); });
 document.addEventListener('pointerlockerror', () => game && game.onLockError());
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();

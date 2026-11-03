@@ -2,7 +2,7 @@
 // 盤面を書き換えたら、node tools/check-maps.mjs で到達性を確認できる
 export const MAPS = {
   '1F': {
-    name: '1F メインフロア', theme: 'hall', wallH: 3, power: false, up: '2F',
+    name: '1F メインフロア', startFace: [38, 7], theme: 'hall', wallH: 3, power: false, up: '2F',
     marks: {
       '1': { kind: 'trigger', id: 'greet' },
       '2': { kind: 'item', id: 'breakerKey', name: '配電盤の鍵', look: 'key', flat: true },
@@ -15,7 +15,7 @@ export const MAPS = {
       '############################################',
       '#....a.#......#...a..#..........#..L.L.L.L.#',
       '#.#.#..#.####.#M....M#.HH....HH.#........a.#',
-      '#......#.#UU#.#......#..........#.....@....#',
+      '#......#.#UU#.#......#..........#.......@..#',
       '#..k...#.#UU#.#P.....#..TT..TT..#...###....#',
       '#......#.#SS#.#......#..TT2.TT..#...###....#',
       '#......#.a...c#MM..X.#....j...km#....F.....#',
@@ -47,7 +47,7 @@ export const MAPS = {
     ],
   },
   '2F': {
-    name: '2F 個室フロア', theme: 'private', wallH: 3, power: true, up: '3F',
+    name: '2F 個室フロア', startFace: [4, 22], theme: 'private', wallH: 3, power: true, up: '3F',
     marks: {
       '4': { kind: 'item', id: 'card2', name: 'カードキー（2F 階段室）', look: 'card' },
     },
@@ -92,7 +92,7 @@ export const MAPS = {
     ],
   },
   '3F': {
-    name: '3F 宴会場', theme: 'banquet', wallH: 6, power: true, up: '4F', below: '2F',
+    name: '3F 宴会場', startFace: [39, 7], theme: 'banquet', wallH: 6, power: true, up: '4F', below: '2F',
     marks: {
       '5': { kind: 'item', id: 'recording', name: '録音機', look: 'recorder', keep: true },
     },
@@ -136,7 +136,7 @@ export const MAPS = {
     ],
   },
   '4F': {
-    name: '4F セントラルキッチン', theme: 'kitchen', wallH: 3, power: false, below: '3F',
+    name: '4F セントラルキッチン', startFace: [4, 7], theme: 'kitchen', wallH: 3, power: false, below: '3F',
     marks: {
       '1': { kind: 'trigger', id: 'collapsed' },
       '6': { kind: 'item', id: 'nameplates', name: 'ネームプレート', look: 'card', keep: true },

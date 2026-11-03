@@ -97,3 +97,5 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-f
 #ov .modes { display: flex; flex-direction: column; gap: 10px; align-items: center; margin: 12px 0; }
 #ov .modes button { min-width: 260px; }
 #ov .endtext { white-space: pre-wrap; text-align: left; max-width: 520px; margin: 0 auto 14px; color: #ccc; font-size: 14px; line-height: 2; }
+
+#keysink { position: fixed; left: -200px; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

@@ -16,6 +16,8 @@
 </head>
 <body>
 <div id="app"></div>
+<!-- プレイ中はここにフォーカスを置き、日本語入力(IME)を無効にする（パスワード欄は IME がオフになる） -->
+<input id="keysink" type="password" autocomplete="new-password" tabindex="-1" aria-hidden="true">
 <div id="ui">
   <div id="locker" class="hide"><div class="slits"></div></div>
   <div id="veil"></div>
