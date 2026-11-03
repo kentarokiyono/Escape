@@ -69,3 +69,31 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-f
 #settings select { background: #222; color: #ddd; border: 1px solid #555; }
 
 #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; color: #888; font-size: 14px; letter-spacing: .2em; z-index: 30; }
+
+#sub { position: absolute; left: 50%; bottom: 27%; transform: translateX(-50%); max-width: 70vw; text-align: center; font-size: 17px; line-height: 1.6; opacity: 0; transition: opacity .25s; text-shadow: 0 0 8px #000, 0 0 3px #000; }
+#sub.on { opacity: 1; }
+#sub .who { display: block; font-size: 12px; letter-spacing: .2em; margin-bottom: 2px; opacity: .8; }
+#sub .who.ai { color: #8fd8ff; } #sub .who.saki { color: #ffc6d0; } #sub .who.robot { color: #9ef0e0; } #sub .who.me { color: #d8d8c8; }
+#note { position: absolute; right: 18px; top: 18px; padding: 8px 14px; border-left: 3px solid #e8d060; background: rgba(0,0,0,.55); font-size: 13px; opacity: 0; transition: opacity .3s; }
+#note.on { opacity: 1; }
+#chapter { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; transition: opacity 1.2s; text-shadow: 0 0 12px #000; }
+#chapter.on { opacity: 1; }
+#chapNo { font-size: 13px; letter-spacing: .5em; color: #aaa; margin-bottom: 10px; }
+#chapTitle { font-size: 30px; letter-spacing: .25em; }
+#face { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #020304; opacity: 0; transition: opacity 2.5s; pointer-events: none; }
+#face.on { opacity: 1; }
+#face div { font-family: monospace; font-size: 18vw; color: #e8f6ff; text-shadow: 0 0 40px #7fd8ff; }
+#radar { position: absolute; right: 16px; bottom: 16px; width: 180px; height: 180px; opacity: .9; }
+#mon { position: absolute; inset: 0; font-family: monospace; color: #e8f0e8; text-shadow: 0 0 4px #000; }
+#mon .rec { position: absolute; left: 24px; top: 20px; color: #f44; }
+#monName { position: absolute; left: 24px; top: 44px; font-size: 18px; }
+#monTime { position: absolute; right: 24px; top: 20px; }
+#mon .help { position: absolute; left: 0; right: 0; bottom: 24px; text-align: center; font-family: sans-serif; font-size: 13px; opacity: .8; }
+#doc { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-1deg); width: min(520px, 88vw); max-height: 70vh; overflow: auto; padding: 26px 28px; background: #d8d0b8; color: #2a2620; box-shadow: 0 10px 50px rgba(0,0,0,.9); font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; }
+#docTtl { font-size: 15px; margin-bottom: 12px; color: #5a4a30; letter-spacing: .1em; }
+#docBody { font-size: 15px; line-height: 2; white-space: pre-wrap; }
+#doc .help { margin-top: 14px; font-size: 11px; color: #7a6a50; font-family: sans-serif; text-align: right; }
+#ovBtns button:disabled { opacity: .35; cursor: default; }
+#ov .modes { display: flex; flex-direction: column; gap: 10px; align-items: center; margin: 12px 0; }
+#ov .modes button { min-width: 260px; }
+#ov .endtext { white-space: pre-wrap; text-align: left; max-width: 520px; margin: 0 auto 14px; color: #ccc; font-size: 14px; line-height: 2; }

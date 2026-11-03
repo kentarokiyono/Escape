@@ -1,18 +1,23 @@
 import { PLAYER, NOISE } from './config.js';
 import { damp } from './util.js';
+import { HOLE } from './physics.js';
 
 export class Player {
   constructor() { this.reset(0, 0, 0); }
 
   reset(x, z, yaw) {
     Object.assign(this, {
-      x, z, yaw, pitch: 0, vx: 0, vz: 0, r: PLAYER.radius,
-      stamina: 100, exhausted: false, crouch: false, dash: false, moving: false, noise: 0,
-      hidden: false, locker: null, yawCenter: 0,
+      x, z, yaw, pitch: 0, vx: 0, vz: 0, r: PLAYER.radius, gy: 0, vy: 0, falling: false, fellThrough: false,
+      stamina: 100, exhausted: false, crouch: false, crawl: false, dash: false, moving: false, noise: 0,
+      hidden: false, locker: null, yawCenter: 0, eye: PLAYER.eye, speedMul: 1, eyeOverride: 0, robot: false,
       eyeH: PLAYER.eye, phase: 0, lastStep: 0, bobAmp: 0, bobX: 0, bobY: 0, roll: 0,
     });
   }
-  place(x, z, yaw) { this.x = x; this.z = z; this.yaw = yaw; this.pitch = 0; this.vx = this.vz = 0; this.hidden = false; this.locker = null; }
+  place(x, z, yaw, gy = 0) {
+    this.x = x; this.z = z; this.yaw = yaw; this.pitch = 0; this.vx = this.vz = 0;
+    this.hidden = false; this.locker = null; this.gy = gy; this.vy = 0; this.falling = false; this.fellThrough = false;
+  }
+  get eyeY() { return this.gy + this.eyeH; }
 
   // 視線方向との一致度（水平）
   facingDot(x, z) {
@@ -31,6 +36,7 @@ export class Player {
   }
 
   update(dt, keys, g) {
+    const ph = g.level.phys;
     const regen = (k) => {
       this.stamina = Math.min(100, this.stamina + PLAYER.staminaRegen * dt * k);
       if (this.exhausted && this.stamina > PLAYER.exhaustRecover) this.exhausted = false;
@@ -42,40 +48,61 @@ export class Player {
       this._bob(dt, 0);
       return;
     }
-    const can = g.state === 'play';
+    const can = g.state === 'play' && !this.falling;
     const k = (a, b) => (can && (keys[a] || keys[b]) ? 1 : 0);
     const f = k('KeyW', 'ArrowUp') - k('KeyS', 'ArrowDown');
     const s = k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft');
     let dx = -Math.sin(this.yaw) * f + Math.cos(this.yaw) * s, dz = -Math.cos(this.yaw) * f - Math.sin(this.yaw) * s;
     const dl = Math.hypot(dx, dz);
     if (dl > 0) { dx /= dl; dz /= dl; }
-    this.crouch = can && !!keys.KeyC;
+    // ダクトの中（または体がかかっている）ならしゃがみ固定
+    const o = { y: this.gy, crouch: false };
+    const stuckUp = !this.robot && ph.collide(this.x, this.z, this.r, o) && !ph.collide(this.x, this.z, this.r, { y: this.gy, crouch: true });
+    this.crawl = !this.robot && ph.inCrawl(this.x, this.z);
+    this.crouch = !this.robot && (this.crawl || stuckUp || (can && !!keys.KeyC));
+    o.crouch = this.crouch; o.robot = this.robot;
     const wantDash = can && (keys.ShiftLeft || keys.ShiftRight) && f > 0;
     this.dash = dl > 0 && wantDash && !this.exhausted && !this.crouch && this.stamina > 0;
     if (this.dash) { this.stamina = Math.max(0, this.stamina - PLAYER.staminaDrain * dt); if (this.stamina <= 0) this.exhausted = true; }
     else regen(dl > 0 ? 0.6 : 1);
-    const sp = this.crouch ? PLAYER.crouch : this.dash ? PLAYER.dash : this.exhausted ? PLAYER.tired : PLAYER.walk;
+    let sp = this.crawl ? 1.1 : this.crouch ? PLAYER.crouch : this.dash ? PLAYER.dash : this.exhausted ? PLAYER.tired : PLAYER.walk;
+    sp *= this.speedMul;
     this.vx = damp(this.vx, dx * sp, 10, dt); this.vz = damp(this.vz, dz * sp, 10, dt);
-    const ph = g.level.phys;
-    const nx = this.x + this.vx * dt, nz = this.z + this.vz * dt;
-    if (!ph.collide(nx, this.z, this.r)) this.x = nx; else this.vx = 0;
-    if (!ph.collide(this.x, nz, this.r)) this.z = nz; else this.vz = 0;
+    if (!this.falling) {
+      const nx = this.x + this.vx * dt, nz = this.z + this.vz * dt;
+      if (ph.canMove(nx, this.z, this.r, o)) this.x = nx; else this.vx = 0;
+      if (ph.canMove(this.x, nz, this.r, o)) this.z = nz; else this.vz = 0;
+    }
+    // 床の高さ・落下
+    const center = ph.groundAt(this.x, this.z);
+    const ground = center <= HOLE + 1 ? HOLE : ph.groundSpan(this.x, this.z, 0.12)[1];
+    if (ground >= this.gy - 0.05 && !this.falling) this.gy = ground > this.gy ? damp(this.gy, ground, 18, dt) : ground;
+    else {
+      if (!this.falling && this.gy - ground > 0.6) { this.falling = true; this.vy = 0; }
+      if (this.falling) {
+        this.vy -= 9.8 * dt; this.gy += this.vy * dt;
+        if (this.gy <= ground) { const v = -this.vy; this.gy = ground; this.vy = 0; this.falling = false; g.onLand(v); }
+        else if (ground === HOLE && this.gy < -2.2 && !this.fellThrough) { this.fellThrough = true; g.onFallThrough(); }
+      } else this.gy = damp(this.gy, ground, 18, dt);
+    }
+
     const speed = Math.hypot(this.vx, this.vz);
     this.moving = speed > 0.3;
-    const wet = g.level.puddles.some((p) => Math.hypot(p.x - this.x, p.z - this.z) < p.r * 0.8);
-    this.noise = !this.moving ? 0 : this.crouch ? NOISE.crouch : this.dash ? NOISE.dash : NOISE.walk * Math.min(1, speed / PLAYER.walk);
+    const wet = g.level.puddles.some((p) => Math.hypot(p.x - this.x, p.z - this.z) < p.r * 0.8) && this.gy < 0.05;
+    this.noise = !this.moving ? 0 : this.crawl ? 1.0 : this.crouch ? NOISE.crouch : this.dash ? NOISE.dash : NOISE.walk * Math.min(1, speed / PLAYER.walk);
     if (wet) this.noise *= 1.4;
-    this.eyeH = damp(this.eyeH, this.crouch ? PLAYER.crouchEye : PLAYER.eye, 10, dt);
+    const eyeT = this.eyeOverride || (this.crawl ? 0.5 : this.crouch ? PLAYER.crouchEye : PLAYER.eye);
+    this.eyeH = damp(this.eyeH, eyeT, 10, dt);
 
-    const stepLen = this.crouch ? 0.55 : this.dash ? 1.0 : 0.75;
+    const stepLen = this.crawl ? 0.5 : this.crouch ? 0.55 : this.dash ? 1.0 : 0.75;
     if (this.moving) this.phase += (speed * dt / stepLen) * Math.PI;
     const idx = Math.floor(this.phase / Math.PI);
     if (idx !== this.lastStep) {
       this.lastStep = idx;
-      if (this.moving) g.audio.step(g.level.surface, this.crouch ? 'crouch' : this.dash ? 'dash' : 'walk', wet);
+      if (this.moving && !this.falling) g.onStep(this.crawl ? 'crawl' : this.crouch ? 'crouch' : this.dash ? 'dash' : 'walk', wet);
     }
     const side = this.vx * Math.cos(this.yaw) - this.vz * Math.sin(this.yaw);
-    this._bob(dt, this.moving ? (this.crouch ? 0.018 : this.dash ? 0.055 : 0.032) : 0, side);
+    this._bob(dt, this.moving ? (this.robot ? 0.006 : this.crawl ? 0.012 : this.crouch ? 0.018 : this.dash ? 0.055 : 0.032) : 0, side);
   }
 
   _bob(dt, amp, side = 0) {
@@ -88,7 +115,7 @@ export class Player {
   applyCamera(cam, t, shake) {
     const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     const sx = shake ? (Math.random() - 0.5) * shake : 0, sy = shake ? (Math.random() - 0.5) * shake : 0;
-    cam.position.set(this.x + rx * this.bobX, this.eyeH + this.bobY + Math.sin(t * 1.3) * 0.004 + sy, this.z + rz * this.bobX);
+    cam.position.set(this.x + rx * this.bobX, this.gy + this.eyeH + this.bobY + Math.sin(t * 1.3) * 0.004 + sy, this.z + rz * this.bobX);
     cam.rotation.set(this.pitch + sy * 0.5, this.yaw + sx * 0.5, this.roll);
   }
 }

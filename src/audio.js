@@ -148,6 +148,61 @@ export class AudioSys {
     this.toneShot(this.bus, { t0: t + 0.05, f: 784, dur: 0.5, vol: 0.06 });
     this.toneShot(this.bus, { t0: t + 0.45, f: 622, dur: 0.8, vol: 0.06 });
   }
+  door(type, x, z) {
+    if (!this.ctx) return;
+    const p = this._at(x, 1.2, z, 2.5, 2), t = this.now;
+    if (type === 'shutter') {
+      this.noiseShot(p, { t0: t, dur: 2.0, type: 'bandpass', freq: 900, q: 2, vol: 0.12, attack: 0.1 });
+      for (let i = 0; i < 12; i++) this.noiseShot(p, { t0: t + i * 0.16, dur: 0.05, freq: 2200, vol: 0.06 });
+    } else {
+      this.toneShot(p, { t0: t, f: 1400, dur: 0.08, vol: 0.06 });
+      this.noiseShot(p, { t0: t + 0.1, dur: 0.6, type: 'lowpass', freq: 600, vol: 0.12, attack: 0.05 });
+    }
+  }
+  breaker(x, z) {
+    if (!this.ctx) return;
+    const p = this._at(x, 1.4, z, 1.5, 2), t = this.now;
+    this.noiseShot(p, { t0: t, dur: 0.12, type: 'lowpass', freq: 1200, vol: 0.3 });
+    this.toneShot(p, { t0: t, f: 120, f2: 60, dur: 0.3, vol: 0.2 });
+    this.noiseShot(this.bus, { t0: t + 0.2, dur: 1.2, freq: 120, q: 4, vol: 0.06, attack: 0.3 });
+  }
+  servo() { if (this.ctx) this.noiseShot(this.bus, { dur: 0.12, freq: 700, q: 3, vol: 0.03, attack: 0.02 }); }
+  land(v) {
+    if (!this.ctx) return;
+    const k = Math.min(1, v / 8), t = this.now;
+    this.toneShot(this.bus, { t0: t, f: 80, f2: 35, dur: 0.25, vol: 0.2 + k * 0.3 });
+    this.noiseShot(this.bus, { t0: t, dur: 0.2, type: 'lowpass', freq: 900, vol: 0.15 + k * 0.25 });
+  }
+  liftRide(sec) {
+    if (!this.ctx) return;
+    const t = this.now;
+    this.noiseShot(this.bus, { t0: t, dur: sec, type: 'bandpass', freq: 160, q: 3, vol: 0.12, attack: 0.4, brown: true });
+    this.toneShot(this.bus, { t0: t, f: 70, f2: 74, dur: sec, type: 'sawtooth', vol: 0.03, attack: 0.4 });
+    this.noiseShot(this.bus, { t0: t + sec - 0.3, dur: 0.15, type: 'lowpass', freq: 800, vol: 0.25 });
+    this.toneShot(this.bus, { t0: t + sec - 0.1, f: 1046, dur: 0.4, vol: 0.05 });
+  }
+  footAt(x, z, vol) {
+    if (!this.ctx) return;
+    const p = this._at(x, 0.2, z, 0.4, 1.5);
+    this.noiseShot(p, { dur: 0.07, freq: 1400 * (0.85 + Math.random() * 0.3), q: 0.8, vol });
+    this.toneShot(p, { f: 95, f2: 45, dur: 0.09, vol: vol * 0.7 });
+  }
+  scream(x, z) {
+    if (!this.ctx) return;
+    const p = this._at(x, 1.5, z, 2, 3), t = this.now;
+    this.noiseShot(p, { t0: t, dur: 0.8, freq: 1800, f2: 900, q: 6, vol: 0.18, attack: 0.03 });
+    this.toneShot(p, { t0: t, f: 620, f2: 380, dur: 0.8, type: 'sawtooth', vol: 0.04 });
+  }
+  // 物語用: 低い持続音（不穏）
+  drone(on) {
+    if (!this.ctx) return;
+    if (!this._drone) {
+      const c = this.ctx, g = c.createGain(); g.gain.value = 0; g.connect(this.ui);
+      for (const f of [55, 58.3, 82.4]) { const o = c.createOscillator(); o.type = 'triangle'; o.frequency.value = f; o.connect(g); o.start(); }
+      this._drone = g;
+    }
+    this._drone.gain.setTargetAtTime(on ? 0.035 * on : 0, this.now, 1.2);
+  }
   uiTone(f, dur = 0.06, type = 'sine', vol = 0.08) { if (this.ctx) this.toneShot(this.ui, { f, dur, type, vol }); }
   click() { if (this.ctx) { this.noiseShot(this.ui, { dur: 0.02, type: 'highpass', freq: 3000, vol: 0.12 }); this.toneShot(this.ui, { f: 2200, dur: 0.02, vol: 0.03 }); } }
   locker(open) {
@@ -188,9 +243,9 @@ export class AudioSys {
     o1.start(); o2.start(); nz.start();
     const nodes = [o1, o2, nz, g1, g2, g3, bp, out, lp, p];
     return {
-      update: (x, z, speed, state, occluded) => {
+      update: (x, z, speed, state, occluded, y = 0) => {
         const t = this.now;
-        this.setPos(p, x, 0.6, z, true);
+        this.setPos(p, x, y + 0.6, z, true);
         const v = state === 'sleep' ? 0 : 0.04 + speed * 0.05 + (state === 'chase' ? 0.04 : 0);
         out.gain.setTargetAtTime(v, t, 0.12);
         lp.frequency.setTargetAtTime(occluded ? 480 : 3200, t, 0.1);
@@ -217,17 +272,23 @@ export class AudioSys {
       o.connect(og); og.connect(g); o.start();
     }
   }
-  // 点滅蛍光灯のジー音（3つ）
-  setBuzz(spots) {
+  // 近くの点滅蛍光灯のジー音（3ボイスを最寄りの照明へ移動）
+  updateBuzz(spots) {
     if (!this.ctx) return;
-    for (const b of this.buzz) b.dispose();
-    this.buzz = spots.map((s) => {
-      const c = this.ctx, p = this.panner(s.x, s.y, s.z, 1.2);
-      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 100;
-      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 240; bp.Q.value = 3;
-      const g = c.createGain(); g.gain.value = 0;
-      o.connect(bp); bp.connect(g); g.connect(p); o.start();
-      return { set: (v) => g.gain.setTargetAtTime(v * 0.05, this.now, 0.02), dispose: () => { o.stop(); o.disconnect(); bp.disconnect(); g.disconnect(); p.disconnect(); } };
+    if (!this.buzz.length) {
+      this.buzz = [0, 1, 2].map(() => {
+        const c = this.ctx, p = this.panner(0, 2.8, 0, 1.2);
+        const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 100;
+        const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 240; bp.Q.value = 3;
+        const g = c.createGain(); g.gain.value = 0;
+        o.connect(bp); bp.connect(g); g.connect(p); o.start();
+        return { p, g };
+      });
+    }
+    this.buzz.forEach((b, i) => {
+      const s = spots[i];
+      if (s) this.setPos(b.p, s.x, s.y, s.z, false);
+      b.g.gain.setTargetAtTime(s ? s.v * 0.04 : 0, this.now, 0.02);
     });
   }
 

@@ -39,6 +39,7 @@ export class Robot {
   constructor(game, x, z, opts = {}) {
     this.g = game;
     this.x = x; this.z = z; this.vx = 0; this.vz = 0; this.r = ROBOT.radius;
+    this.gy = game.level ? game.level.groundAt(x, z) : 0;
     this.heading = opts.heading ?? Math.random() * Math.PI * 2;
     this.headYaw = 0; this.speedNow = 0; this.t = Math.random() * 10;
     this.state = opts.sleep ? 'sleep' : 'patrol';
@@ -109,7 +110,7 @@ export class Robot {
     }
     const dx = p.x - this.x, dz = p.z - this.z, dist = Math.hypot(dx, dz);
     let vis = null;
-    const los = () => (vis === null ? (vis = dist < 40 && lv.phys.los(this.x, this.z, p.x, p.z, p.eyeH * 0.75)) : vis);
+    const los = () => (vis === null ? (vis = dist < 40 && lv.phys.los(this.x, this.gy + 1.3, this.z, p.x, p.gy + p.eyeH * 0.8, p.z)) : vis);
 
     // ---- 知覚 ----
     let see = false, heard = false;
@@ -149,7 +150,7 @@ export class Robot {
         if (this.sinceSeen > ROBOT.loseTime || (!track && Math.hypot(this.lastSeen.x - this.x, this.lastSeen.z - this.z) < 0.8)) {
           this.enter('search', this.lastSeen); tx = null; break;
         }
-        if (!p.hidden && dist < ROBOT.catchDist && los()) g.caught(this);
+        if (!p.hidden && dist < ROBOT.catchDist && Math.abs(p.gy - this.gy) < 0.5 && los()) g.caught(this);
         break;
       }
       case 'inspect': {
@@ -206,7 +207,7 @@ export class Robot {
     if (look) headT = clamp(angDiff(this.heading, Math.atan2(look.x - this.x, look.z - this.z)), -1.3, 1.3);
     this.headYaw = damp(this.headYaw, headT, 6, dt);
     this._sync(dt);
-    if (this.voice) this.voice.update(this.x, this.z, this.speedNow, this.state, dist > 40 || !los());
+    if (this.voice) this.voice.update(this.x, this.z, this.speedNow, this.state, dist > 40 || !los(), this.gy);
   }
 
   _turnToward(x, z, dt, rate) {
@@ -219,7 +220,7 @@ export class Robot {
     let wx = tx, wz = tz;
     const d = Math.hypot(tx - this.x, tz - this.z);
     if (!(d < 3 && nav.lineFree(this.x, this.z, tx, tz))) {
-      const w = nav.next(this.x, this.z, nav.fieldAt(tx, tz));
+      const w = nav.next(this.x, this.z, nav.fieldAt(tx, tz, g.level.groundAt(tx, tz)), this.gy);
       if (w) { wx = w.x; wz = w.z; }
     }
     let dx = wx - this.x, dz = wz - this.z;
@@ -247,14 +248,16 @@ export class Robot {
   _applyVel(dt) {
     const ph = this.g.level.phys;
     const nx = this.x + this.vx * dt, nz = this.z + this.vz * dt;
-    if (!ph.collide(nx, this.z, this.r)) this.x = nx; else this.vx *= 0.3;
-    if (!ph.collide(this.x, nz, this.r)) this.z = nz; else this.vz *= 0.3;
+    const o = { robot: true, y: this.gy };
+    if (ph.canMove(nx, this.z, this.r, o)) this.x = nx; else this.vx *= 0.3;
+    if (ph.canMove(this.x, nz, this.r, o)) this.z = nz; else this.vz *= 0.3;
+    this.gy = Math.max(-1, ph.groundAt(this.x, this.z));
     this.speedNow = Math.hypot(this.vx, this.vz);
   }
 
   _sync(dt) {
     const s = this.speedNow;
-    this.group.position.set(this.x, s > 0.1 ? Math.sin(this.t * 14) * 0.004 * s : 0, this.z);
+    this.group.position.set(this.x, this.gy + (s > 0.1 ? Math.sin(this.t * 14) * 0.004 * s : 0), this.z);
     this.group.rotation.y = this.heading;
     this.pivot.rotation.x = damp(this.pivot.rotation.x, s * 0.035, 5, dt);
     this.head.rotation.y = this.headYaw;
