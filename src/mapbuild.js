@@ -219,7 +219,7 @@ export function buildMapLevel(id, def, M, st, opts = {}) {
   const marks = def.marks || {}, lifts = def.lifts || {};
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
     const ch = G[r][c], x = X(c), z = Z(r), y = h[r][c];
-    if (ch === '@') lv.markers['@'] = { x, z, y };
+    if (ch === '@') lv.markers['@'] = { x, z, y, yaw: def.startFace ? Math.atan2(-(X(def.startFace[0]) - x), -(Z(def.startFace[1]) - z)) : undefined }; // 出入口の方を向く
     else if (ch === 'r') lv.spawns.push({ x, z, sleep: false });
     else if (ch === 'z') lv.docks.push({ x, z });
     else if (ch === 'a') lv.npcSpawns.push({ x, z });

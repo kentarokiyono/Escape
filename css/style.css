@@ -49,8 +49,8 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-f
 #codeBox .cancel { margin-top: 10px; width: 240px; font-size: 14px; padding: 8px 0; font-family: sans-serif; }
 #codeErr { color: #f66; font-size: 13px; min-height: 16px; margin-top: 8px; }
 
-#ov { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.9); pointer-events: auto; text-align: center; z-index: 20; overflow-y: auto; }
-#ov .panel { max-width: 640px; padding: 24px 16px; }
+#ov { position: absolute; inset: 0; display: flex; align-items: flex-start; justify-content: center; background: rgba(0,0,0,.9); pointer-events: auto; text-align: center; z-index: 20; overflow-y: auto; }
+#ov .panel { max-width: 640px; padding: 24px 16px; margin: auto; }
 #ov .face { font-family: monospace; font-size: 52px; margin-bottom: 6px; text-shadow: 0 0 18px #7fd8ff; }
 #ov h1 { font-size: 22px; letter-spacing: .18em; margin: 0 0 14px; font-weight: 600; }
 #ov p { color: #aaa; font-size: 13px; line-height: 1.9; margin: 0 0 10px; }
@@ -97,3 +97,47 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-f
 #ov .modes { display: flex; flex-direction: column; gap: 10px; align-items: center; margin: 12px 0; }
 #ov .modes button { min-width: 260px; }
 #ov .endtext { white-space: pre-wrap; text-align: left; max-width: 520px; margin: 0 auto 14px; color: #ccc; font-size: 14px; line-height: 2; }
+
+#keysink { position: fixed; left: -200px; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* ---------- タッチ（スマホ横画面） ---------- */
+html, body { overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.touch #app canvas { touch-action: none; }
+#touch { position: absolute; inset: 0; pointer-events: none; }
+#touch button { pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); background: rgba(20,20,20,.35); color: #eee; font-size: 12px; }
+#touch button.on { background: rgba(220,220,200,.4); }
+#tBtns { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: 14px; display: grid; grid-template-columns: repeat(3, 58px); grid-auto-rows: 58px; gap: 16px; direction: rtl; }
+#tBtns button { width: 58px; height: 58px; direction: ltr; }
+#tBtns button.big { width: 68px; height: 68px; margin: -5px; font-size: 14px; }
+#tPause { position: absolute; right: max(14px, env(safe-area-inset-right)); top: 10px; width: 40px; height: 40px; }
+#tStick { position: absolute; width: 130px; height: 130px; margin: -65px 0 0 -65px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(0,0,0,.18); }
+#tKnob { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; border-radius: 50%; background: rgba(230,230,220,.35); }
+#tMon { position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); display: none; gap: 18px; }
+#tMon.show { display: flex; }
+#tMon button { width: 64px; height: 64px; font-size: 14px; }
+.touch #hud { bottom: auto; top: 36px; font-size: 11px; line-height: 1.6; max-width: 46vw; }
+.touch #floorTag { left: max(16px, env(safe-area-inset-left)); }
+.touch #prompt { bottom: 30%; font-size: 14px; }
+.touch #sub { bottom: 38%; font-size: 15px; max-width: 60vw; }
+.touch #radar { right: auto; left: 50%; transform: translateX(-50%); bottom: 8px; width: 120px; height: 120px; }
+.touch #mon .help { display: none; }
+.touch #doc .help::after { content: '（調べるボタンでも閉じる）'; }
+.touch #ov table.keys { display: none; }
+.touchhelp { color: #ddd !important; }
+#rotate { display: none; }
+@media (orientation: portrait) {
+  .touch #rotate { display: flex; position: fixed; inset: 0; z-index: 100; background: #000; color: #ddd; flex-direction: column; align-items: center; justify-content: center; font-size: 15px; }
+  .touch #rotate div { font-size: 48px; margin-bottom: 12px; }
+}
+@media (max-height: 500px) {
+  #ov .face { font-size: 34px; margin-bottom: 0; }
+  #ov h1 { font-size: 18px; margin-bottom: 8px; }
+  #ov p { font-size: 12px; line-height: 1.6; }
+  #ovBtns { margin: 8px 0; gap: 8px; }
+  #ovBtns button { padding: 8px 14px; font-size: 13px; }
+  #codeBox { padding: 12px 18px; }
+  #codeDisp { font-size: 28px; margin-bottom: 8px; }
+  #codePad button { padding: 8px 0; font-size: 18px; }
+  #memo { transform: translate(-50%, -50%) rotate(-2deg) scale(.8); }
+  #chapTitle { font-size: 24px; }
+}

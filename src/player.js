@@ -50,18 +50,21 @@ export class Player {
     }
     const can = g.state === 'play' && !this.falling;
     const k = (a, b) => (can && (keys[a] || keys[b]) ? 1 : 0);
-    const f = k('KeyW', 'ArrowUp') - k('KeyS', 'ArrowDown');
-    const s = k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft');
+    let f = k('KeyW', 'ArrowUp') - k('KeyS', 'ArrowDown');
+    let s = k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft');
+    let mag = 1;
+    const tm = g.touchMove; // タッチのスティック（倒した量で速度が変わる）
+    if (tm && tm.active && can) { f = -tm.y; s = tm.x; mag = Math.min(1, Math.hypot(f, s)); }
     let dx = -Math.sin(this.yaw) * f + Math.cos(this.yaw) * s, dz = -Math.cos(this.yaw) * f - Math.sin(this.yaw) * s;
     const dl = Math.hypot(dx, dz);
-    if (dl > 0) { dx /= dl; dz /= dl; }
+    if (dl > 0) { dx = (dx / dl) * mag; dz = (dz / dl) * mag; }
     // ダクトの中（または体がかかっている）ならしゃがみ固定
     const o = { y: this.gy, crouch: false };
     const stuckUp = !this.robot && ph.collide(this.x, this.z, this.r, o) && !ph.collide(this.x, this.z, this.r, { y: this.gy, crouch: true });
     this.crawl = !this.robot && ph.inCrawl(this.x, this.z);
     this.crouch = !this.robot && (this.crawl || stuckUp || (can && !!keys.KeyC));
     o.crouch = this.crouch; o.robot = this.robot;
-    const wantDash = can && (keys.ShiftLeft || keys.ShiftRight) && f > 0;
+    const wantDash = can && (keys.ShiftLeft || keys.ShiftRight) && f > 0.3;
     this.dash = dl > 0 && wantDash && !this.exhausted && !this.crouch && this.stamina > 0;
     if (this.dash) { this.stamina = Math.max(0, this.stamina - PLAYER.staminaDrain * dt); if (this.stamina <= 0) this.exhausted = true; }
     else regen(dl > 0 ? 0.6 : 1);

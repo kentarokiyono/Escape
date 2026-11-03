@@ -8,8 +8,10 @@ import { STORAGE_KEYS } from './config.js';
 import { FreeMode } from './modes/free.js';
 import { StoryMode, UNLOCK_KEY } from './modes/story.js';
 import { RobotMode } from './modes/robot.js';
+import { TouchControls, isTouch } from './touch.js';
 
-const settings = Object.assign({ sens: 1, vol: 0.8, quality: 'high' }, storage.get(STORAGE_KEYS.settings, {}));
+const TOUCH = isTouch();
+const settings = Object.assign({ sens: 1, vol: 0.8, quality: TOUCH ? 'low' : 'high' }, storage.get(STORAGE_KEYS.settings, {}));
 const ui = new UI();
 ui.loading('建物を生成中…');
 
@@ -36,9 +38,9 @@ const urlSeed = params.has('seed') ? Number(params.get('seed')) >>> 0 : null;
 const randomSeed = () => (Math.random() * 1e9) >>> 0;
 
 const app = {
-  startFree(seed) { stop(); game.setMode(new FreeMode(game, app, seed ?? urlSeed ?? randomSeed())); game.mode.start(); },
-  startStory(cont) { stop(); game.setMode(new StoryMode(game, app, cont)); game.mode.start(); },
-  startRobot() { stop(); game.setMode(new RobotMode(game, app)); game.mode.start(); },
+  startFree(seed) { stop(); if (TOUCH) TouchControls.enterFullscreen(); game.setMode(new FreeMode(game, app, seed ?? urlSeed ?? randomSeed())); game.mode.start(); },
+  startStory(cont) { stop(); if (TOUCH) TouchControls.enterFullscreen(); game.setMode(new StoryMode(game, app, cont)); game.mode.start(); },
+  startRobot() { stop(); if (TOUCH) TouchControls.enterFullscreen(); game.setMode(new RobotMode(game, app)); game.mode.start(); },
   showTitle,
 };
 function stop() {
@@ -67,6 +69,7 @@ function showTitle() {
   ui.overlay({
     title: 'お席へご案内します ―廃墟階―',
     body: '<p>閉店から10年。元ファミレスのビルで、給仕ロボットは今も“営業中”。</p>' +
+      (TOUCH ? '<p class="touchhelp">左側をドラッグ：移動　右側をドラッグ：視点<br>ボタン：調べる・走る・しゃがむ・ライト・マップ</p>' : '') +
       '<table class="keys">' +
       '<tr><th>マウス</th><td>視点</td><th>WASD</th><td>移動</td></tr>' +
       '<tr><th>Shift</th><td>ダッシュ（スタミナ）</td><th>C</th><td>しゃがむ（静か・ダクトを通れる）</td></tr>' +
@@ -86,6 +89,8 @@ function showTitle() {
 
 function init() {
   game = new Game({ renderer, scene, camera, audio, ui, fx, settings });
+  let touch = null;
+  if (TOUCH) { game.touch = true; touch = new TouchControls(game, settings); window.__touch = touch; }
   game.setMode(new FreeMode(game, app, urlSeed ?? randomSeed()));
   game.mode.newRun(); // タイトルの背景として生成
   game.state = 'menu';
@@ -97,8 +102,22 @@ function init() {
 }
 
 // ---------- 入力 ----------
+// プレイ中のキー入力は見えないパスワード欄で受ける（IME がオンでも英字キーとして届く）
+const sink = document.getElementById('keysink');
+const focusSink = () => { if (game && game.touch) return; // タッチ端末ではキーボードを出さない
+  if (document.activeElement !== sink) try { sink.focus({ preventScroll: true }); } catch (e) { /* 無視 */ } };
+sink.addEventListener('input', () => { sink.value = ''; });
+// e.code が取れない環境向けに、文字から物理キーを推定する
+const KEYMAP = { w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD', e: 'KeyE', f: 'KeyF', m: 'KeyM', c: 'KeyC', ' ': 'Space', Shift: 'ShiftLeft', Escape: 'Escape' };
+const codeOf = (e) => e.code || KEYMAP[e.key] || KEYMAP[(e.key || '').toLowerCase()] || '';
+let imeWarnT = 0;
 addEventListener('keydown', (e) => {
   if (!game) return;
+  if ((e.key === 'Process' || e.keyCode === 229) && !codeOf(e)) {
+    if (performance.now() - imeWarnT > 4000) { imeWarnT = performance.now(); ui.say('日本語入力（IME）をオフにしてください。キー操作が届いていません', 4); }
+    return;
+  }
+  const code = codeOf(e);
   if (game.state === 'code') {
     if (e.key >= '0' && e.key <= '9') game.codeDigit(Number(e.key));
     else if (e.key === 'Backspace') game.codeDel();
@@ -108,19 +127,19 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (game.state === 'monitor') {
-    if (e.code === 'KeyA' || e.code === 'ArrowLeft') game.cycleMonitor(-1);
-    else if (e.code === 'KeyD' || e.code === 'ArrowRight') game.cycleMonitor(1);
-    else if (e.code === 'KeyE') game.exitMonitor();
+    if (code === 'KeyA' || code === 'ArrowLeft') game.cycleMonitor(-1);
+    else if (code === 'KeyD' || code === 'ArrowRight') game.cycleMonitor(1);
+    else if (code === 'KeyE') game.exitMonitor();
     return;
   }
-  if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-  game.keys[e.code] = true;
+  if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) e.preventDefault();
+  game.keys[code] = true;
   if (e.repeat) return;
-  if (e.code === 'KeyE') game.interact();
-  else if (e.code === 'KeyF') game.toggleFlash();
-  else if (e.code === 'KeyM') game.toggleMap();
+  if (code === 'KeyE') game.interact();
+  else if (code === 'KeyF') game.toggleFlash();
+  else if (code === 'KeyM') game.toggleMap();
 });
-addEventListener('keyup', (e) => { if (game) game.keys[e.code] = false; });
+addEventListener('keyup', (e) => { if (game) game.keys[codeOf(e)] = false; });
 addEventListener('blur', () => { if (game) for (const k in game.keys) game.keys[k] = false; });
 addEventListener('mousemove', (e) => {
   if (!game || !game.isLocked() || (game.state !== 'play' && game.state !== 'trans')) return;
@@ -128,7 +147,8 @@ addEventListener('mousemove', (e) => {
   const k = 0.0022 * settings.sens;
   game.player.look(e.movementX * k, e.movementY * k);
 });
-document.addEventListener('pointerlockchange', () => game && game.onLockChange());
+document.addEventListener('pointerlockchange', () => { if (!game) return; if (game.isLocked()) focusSink(); game.onLockChange(); });
+addEventListener('mousedown', () => { if (game && game.isLocked()) focusSink(); });
 document.addEventListener('pointerlockerror', () => game && game.onLockError());
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -143,6 +163,7 @@ function loop(ts) {
   last = ts;
   if (game.state !== 'pause' && game.state !== 'menu') ui.updateSubtitles(dt);
   game.frame(dt);
+  if (window.__touch) window.__touch.update();
 }
 
 setTimeout(init, 30);
