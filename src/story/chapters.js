@@ -23,9 +23,10 @@ export const CHAPTERS = [
       if (!on || S.flag('ch1_power')) return;
       S.setFlag('ch1_power');
       S.say('ch1_power');
-      S.wake('docks', 'search');
+      // 放送のあと、ホールのロボットが少しずつ持ち場（巡回）につく
+      S.after(5, () => S.wake('docks', 'patrol', 8));
       S.objective('シャッターの開いた階段から 2F へ');
-      S.spawnRule({ interval: 45, max: 6 });
+      S.spawnRule({ interval: 70, max: 4 });
     },
   },
   {
@@ -46,7 +47,7 @@ export const CHAPTERS = [
         if (S.flag('ch3_rec')) return;
         S.setFlag('ch3_rec');
         S.say('ch3_record');
-        S.after(9, () => { S.openDoor('stair3'); S.wake('docks', 'chase'); S.objective('北東の階段室から 4F へ'); S.spawnRule({ interval: 25, max: 9 }); });
+        S.after(9, () => { S.openDoor('stair3'); S.wake('docks', 'patrol', 10, 6); S.objective('北東の階段室から 4F へ'); S.spawnRule({ interval: 50, max: 8 }); });
       },
     },
     fall(S) { S.say('ch3_fall'); S.objective('2F の階段から 3F へ戻る'); },
@@ -62,7 +63,7 @@ export const CHAPTERS = [
       if (!on || S.flag('ch4_power')) return;
       S.setFlag('ch4_power');
       S.say('ch4_power');
-      S.wake('docks', 'search');
+      S.after(4, () => S.wake('docks', 'patrol', 8));
       S.objective('配膳リフトで 5F へ（動作音でロボットが集まる）');
     },
   },
@@ -78,7 +79,7 @@ export const CHAPTERS = [
         S.setFlag('stopped'); S.give('stopped');
         S.say('ch5_stop');
         S.drone(1);
-        S.after(14, () => { S.setPower(false); S.wake('docks', 'chase'); S.objective('マスターキーを取り、エレベーターで 1F へ'); S.drone(0); S.spawnRule({ interval: 20, max: 10 }); });
+        S.after(14, () => { S.setPower(false); S.wake('docks', 'search', 12); S.objective('マスターキーを取り、エレベーターで 1F へ'); S.drone(0); S.spawnRule({ interval: 35, max: 7 }); });
       },
       master(S) { S.objective('エレベーターで 1F へ'); },
     },
@@ -87,8 +88,8 @@ export const CHAPTERS = [
   {
     id: 'final', no: '終章', title: 'お会計', map: '1F', at: 'elev1', startPower: false, dark: true,
     objective: '1F の脱出口からビルの外へ',
-    spawn: { interval: 15, max: 10 },
-    setup(S) { S.wake('all', 'search'); S.spawn(4); },
+    spawn: { interval: 30, max: 7 },
+    setup(S) { S.wake('all', 'patrol', 6); S.spawn(2); },
     start(S) { S.say('fin_start'); },
   },
 ];

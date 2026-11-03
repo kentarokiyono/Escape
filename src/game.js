@@ -164,7 +164,7 @@ export class Game {
       lv.breaker.lever.rotation.x = on ? -0.6 : 0.6;
     }
     for (const L of lv.lifts) L.panelMat.color.copy(on ? this.M.ledGreen.color : this.M.ledRed.color);
-    for (const c of lv.cameras) if (!on) c.ledMat.color.setScalar(0.05);
+    for (const c of lv.cameras) { if (!on) c.ledMat.color.setScalar(0.05); else if (!instant) { c.cd = 8; c.spotT = 0; } } // 電源投入直後のカメラは起動待ち
     if (!instant) lv.refresh();
   }
 
@@ -457,7 +457,7 @@ export class Game {
         if (!this.level.power && b.need && !this.mode.has(b.need)) { this.audio.locked(); break; }
         this.audio.breaker(b.x, b.z);
         this.applyPower(!this.level.power);
-        this.noiseAt(b.x, b.z, 12);
+        this.noiseAt(b.x, b.z, this.mode.breakerNoise ?? 12);
         if (this.mode.onPower) this.mode.onPower(this.level.power, b);
         break;
       }

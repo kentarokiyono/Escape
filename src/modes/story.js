@@ -111,7 +111,7 @@ export class StoryMode {
       flag: (id) => self.s.flags.includes(id),
       setFlag: (id) => { if (!self.s.flags.includes(id)) self.s.flags.push(id); },
       next: () => self.next(),
-      wake: (id, how) => self.wake(id, how),
+      wake: (id, how, stagger, limit) => self.wake(id, how, stagger, limit),
       openDoor: (id) => { const d = g.level.doors.find((x) => x.id === id); if (d) { g.openDoor(d); self.ms(self.mapId).doors.push(id); } },
       setPower: (on) => { self.ms(self.mapId).power = on; g.applyPower(on); },
       spawnRule: (cfg) => { self.spawnCfg = cfg; self.spawnT = 0; },
@@ -122,17 +122,28 @@ export class StoryMode {
   }
   has(id) { return this.s.inv.includes(id); }
   hasExitKey() { return this.has('master'); }
-  wake(id, how) {
+  // how: 'patrol'（持ち場へ）/ 'search'（プレイヤーの今の位置を調べに来る）/ 'chase'
+  // stagger: 起動を 0〜stagger 秒ばらつかせる（一斉に押し寄せないように）
+  // limit: 起動する最大台数（残りは眠ったまま）
+  wake(id, how, stagger = 0, limit = Infinity) {
     const g = this.g, p = g.player;
     const ms = this.ms(this.mapId);
     if (!ms.awake.includes(id)) ms.awake.push(id);
+    let n = 0;
     for (const r of g.robots) {
       if (r.state !== 'sleep') continue;
       if (!(id === 'all' || (id === 'docks' && r.dock) || r.sid === id)) continue;
-      if (how === 'chase') { r.enter('chase'); r.sinceSeen = 0; r.lastSeen = { x: p.x, z: p.z }; }
-      else r.enter('search', { x: p.x, z: p.z });
+      if (n++ >= limit) break;
+      const go = () => {
+        if (r.state !== 'sleep' || !g.robots.includes(r)) return;
+        if (how === 'chase') { r.enter('chase'); r.sinceSeen = 0; r.lastSeen = { x: p.x, z: p.z }; }
+        else if (how === 'search') r.enter('search', { x: p.x, z: p.z });
+        else r.enter('patrol');
+      };
+      if (stagger > 0) this.timers.push({ t: Math.random() * stagger, fn: go }); else go();
     }
   }
+  get breakerNoise() { return 5; }
 
   // ---------- 毎フレーム ----------
   update(dt) {
