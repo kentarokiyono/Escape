@@ -597,8 +597,14 @@ export class Game {
   }
 
   // ---------- 一時停止・ポインタロック ----------
-  isLocked() { return document.pointerLockElement === this.renderer.domElement; }
+  // タッチ端末はポインタロックが無いので、プレイ中フラグで代用する
+  isLocked() { return this.touch ? this.touchActive : document.pointerLockElement === this.renderer.domElement; }
   requestLock() {
+    if (this.touch) {
+      this.touchActive = true;
+      setTimeout(() => { if (this.state === 'pause' || this.state === 'title') this.resumePlay(); }, 0);
+      return;
+    }
     const el = this.renderer.domElement;
     try {
       const r = el.requestPointerLock();
@@ -626,6 +632,7 @@ export class Game {
     if (this.audio.ctx && this.audio.ctx.state === 'suspended') this.audio.ctx.resume();
   }
   pause() {
+    if (this.touch) { this.touchActive = false; for (const k in this.keys) this.keys[k] = false; }
     if (this.state === 'monitor') { this.fx.setCamera(this.camera); this.fx.u.mon.value = 0; this.ui.monitor(null); }
     this.state = 'pause';
     if (this.audio.ctx) this.audio.ctx.suspend();
