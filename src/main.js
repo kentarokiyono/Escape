@@ -10,9 +10,15 @@ import { StoryMode, UNLOCK_KEY } from './modes/story.js';
 import { RobotMode } from './modes/robot.js';
 import { TouchControls, isTouch } from './touch.js';
 
+// iPhone の Safari などは Pointer Lock 非対応。呼び出しで例外にならないよう空の関数で補う
+if (!document.exitPointerLock) document.exitPointerLock = () => {};
+if (!Element.prototype.requestPointerLock) Element.prototype.requestPointerLock = function () { return Promise.reject(new Error('pointer lock unsupported')); };
 const TOUCH = isTouch();
 const settings = Object.assign({ sens: 1, vol: 0.8, quality: TOUCH ? 'low' : 'high' }, storage.get(STORAGE_KEYS.settings, {}));
 const ui = new UI();
+// 想定外のエラーは画面にも出す（不具合報告用）
+addEventListener('error', (e) => ui.say('エラー: ' + (e.message || e.error), 10));
+addEventListener('unhandledrejection', (e) => { const m = e.reason && e.reason.message; if (m && !/pointer lock/i.test(m)) ui.say('エラー: ' + m, 10); });
 ui.loading('建物を生成中…');
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
