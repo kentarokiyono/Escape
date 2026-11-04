@@ -34,7 +34,7 @@ for (const [id, def] of Object.entries(MAPS)) {
     }
   }
   const need = [];
-  G.forEach((row, r) => [...row].forEach((ch, c) => { if ('UjxPmFK123456789'.includes(ch) || (def.marks && def.marks[ch])) need.push([ch, c, r]); }));
+  G.forEach((row, r) => [...row].forEach((ch, c) => { if ('UjxPmFK123456789bgqny'.includes(ch) || (def.marks && def.marks[ch])) need.push([ch, c, r]); }));
   for (const [ch, c, r] of need) {
     const ok = [[0, 0], [0, 1], [1, 0], [0, -1], [-1, 0]].some(([dx, dy]) => seen.has((c + dx) + ',' + (r + dy)));
     if (!ok) { console.log(id, 'unreachable', ch, 'at', c, r); bad++; }

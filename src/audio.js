@@ -193,6 +193,40 @@ export class AudioSys {
     this.noiseShot(p, { t0: t, dur: 0.8, freq: 1800, f2: 900, q: 6, vol: 0.18, attack: 0.03 });
     this.toneShot(p, { t0: t, f: 620, f2: 380, dur: 0.8, type: 'sawtooth', vol: 0.04 });
   }
+  whoosh() { if (this.ctx) this.noiseShot(this.ui, { dur: 0.25, freq: 900, f2: 2400, q: 1.5, vol: 0.05, attack: 0.08 }); }
+  // 投げた物の衝突音（皿は高く割れる音、缶は金属音）
+  crash(x, y, z, plate, k = 1) {
+    if (!this.ctx) return;
+    const p = this._at(x, y, z, 1.2, 1.5), t = this.now;
+    if (plate) {
+      this.noiseShot(p, { t0: t, dur: 0.35, type: 'highpass', freq: 2500, vol: 0.3 * k, attack: 0.002 });
+      for (let i = 0; i < 4; i++) this.toneShot(p, { t0: t + i * 0.03, f: 2600 + Math.random() * 1800, dur: 0.2, type: 'triangle', vol: 0.05 * k });
+    } else {
+      this.toneShot(p, { t0: t, f: 700, f2: 520, dur: 0.3, type: 'triangle', vol: 0.12 * k });
+      this.noiseShot(p, { t0: t, dur: 0.15, freq: 3000, q: 4, vol: 0.12 * k });
+    }
+  }
+  // リモコンの停止信号とロボットの停止音
+  zap(x, z) {
+    if (!this.ctx) return;
+    const t = this.now;
+    this.toneShot(this.ui, { t0: t, f: 1800, f2: 3600, dur: 0.12, type: 'square', vol: 0.03 });
+    const p = this._at(x, 1, z, 2, 2);
+    this.toneShot(p, { t0: t + 0.08, f: 420, f2: 40, dur: 1.2, type: 'sawtooth', vol: 0.12 });
+    this.noiseShot(p, { t0: t + 0.08, dur: 0.3, freq: 2500, vol: 0.08 });
+  }
+  powerDown(x, z) {
+    if (!this.ctx) return;
+    const p = this._at(x, 1, z, 2, 2.5);
+    this.toneShot(p, { f: 300, f2: 30, dur: 2.0, type: 'sawtooth', vol: 0.08 });
+  }
+  trip(x, z) {
+    if (!this.ctx) return;
+    const p = this._at(x, 1.4, z, 1.5, 2), t = this.now;
+    this.noiseShot(p, { t0: t, dur: 0.05, type: 'highpass', freq: 3000, vol: 0.4 });
+    this.noiseShot(p, { t0: t + 0.02, dur: 0.3, type: 'lowpass', freq: 900, vol: 0.35 });
+    this.toneShot(p, { t0: t, f: 90, f2: 40, dur: 0.4, vol: 0.3 });
+  }
   // 物語用: 低い持続音（不穏）
   drone(on) {
     if (!this.ctx) return;

@@ -107,7 +107,8 @@ export class Level {
     this.owned = [];
     this.phys = new Physics(hx, hz, gridOff); this.nav = null;
     this.lockers = []; this.tablets = []; this.pads = []; this.interacts = []; this.cameras = [];
-    this.doors = []; this.lifts = []; this.lightSpots = []; this.puddles = []; this.docks = []; this.spawns = [];
+    this.doors = []; this.lifts = []; this.lightSpots = []; this.puddles = []; this.docks = []; this.spawns = []; this.chargers = [];
+    this.sys = { light: true, camera: true, shutter: true, lift: false }; // 配電盤の系統（初期配分）
     this.walls = []; this.memos = []; this.markers = {}; this.exit = null; this.key = null;
     this.power = true; this.valid = true; this.reach = null; this.reachFrom = null;
     this.VW = Math.ceil(hx); this.VH = Math.ceil(hz); // 踏破記録（2m 単位）
@@ -529,10 +530,25 @@ export class Builder {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.009, 8, 20), M.gold);
       const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.012, 0.012), M.gold); shaft.position.x = 0.08;
       const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.03, 0.012), M.gold); tooth.position.set(0.12, -0.02, 0);
-      mesh.add(ring, shaft, tooth); mesh.position.y = 0.95;
+      mesh.add(ring, shaft, tooth); mesh.position.y = o.flat ? 0.03 : 0.95; if (o.flat) mesh.rotation.x = Math.PI / 2;
     } else if (o.look === 'card') {
       mesh = new THREE.Mesh(new THREE.BoxGeometry(0.086, 0.005, 0.054), this.lv.mat(new THREE.MeshStandardMaterial({ color: 0x3a6fd8, emissive: 0x2244aa, emissiveIntensity: 1.5, roughness: 0.4 })));
       mesh.position.y = 0.02;
+    } else if (o.look === 'cell') {
+      mesh = new THREE.Group();
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.06, 10), this.lv.mat(new THREE.MeshStandardMaterial({ color: 0x2a6a3a, emissive: 0x20a040, emissiveIntensity: 0.6, roughness: 0.4, metalness: 0.4 })));
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.01, 6), M.steel); t.position.y = 0.035;
+      c.add(t); mesh.add(c); mesh.rotation.z = Math.PI / 2; mesh.position.y = 0.02;
+    } else if (o.look === 'remote') {
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.14), M.dark);
+      const l = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.01, 0.02), M.ledRed); l.position.set(0, 0.012, 0.05); mesh.add(l);
+      mesh.position.y = 0.012;
+    } else if (o.look === 'plate') {
+      mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.08, 0.025, 20), this.lv.mat(new THREE.MeshStandardMaterial({ color: 0xe8e4da, roughness: 0.3, emissive: 0x302a20, emissiveIntensity: 0.4 })));
+      mesh.position.y = 0.015;
+    } else if (o.look === 'doc') {
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.02, 0.31), this.lv.mat(new THREE.MeshStandardMaterial({ color: 0x2850a0, emissive: 0x1a3070, emissiveIntensity: 0.8, roughness: 0.6 })));
+      mesh.rotation.y = this.R() * 6; mesh.position.y = 0.012;
     } else if (o.look === 'recorder') {
       mesh = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.04, 0.08), M.dark);
       const l = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.01, 0.02), M.ledRed); l.position.set(0.04, 0.025, 0); mesh.add(l);
@@ -547,14 +563,23 @@ export class Builder {
     this.lv.interacts.push(it);
     return it;
   }
-  memo(code, n, x, z, y = 0) {
-    const tx = memoTexture(code, n);
+  // puz: { title, short, body }（暗号メモ）
+  memo(puz, x, z, y = 0) {
+    const tx = memoTexture('階段コード（暗号）', puz.short, Math.floor(x * 31 + z * 17));
     const mat = this.lv.mat(new THREE.MeshStandardMaterial({ map: tx, emissiveMap: tx, emissive: 0xffffff, emissiveIntensity: 0.22, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -3 }));
     const m = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.35), mat);
     m.rotation.set(-Math.PI / 2, 0, this.R() * 6); m.position.set(x, y + 0.01, z); m.receiveShadow = true;
     this.lv.group.add(m);
     this.lv.memos.push({ x, z });
-    this.lv.interacts.push({ kind: 'memo', x, z, y, r: 1.3 });
+    this.lv.interacts.push({ kind: 'memo', x, z, y, r: 1.3, puz });
+  }
+  // ロボットの充電ドック（空き）
+  charger(x, z, ry = 0) {
+    const M = this.M;
+    this.box(M.dark, 0, x, 0.03, z, 1, 0.06, 1);
+    this.put(M.ledBlue, 0, xform(new THREE.BoxGeometry(0.9, 0.012, 0.03), P(x, z, ry), 0, 0.065, 0.48), false);
+    this.put(M.metal, M.metalScale, xform(new THREE.BoxGeometry(0.5, 0.6, 0.12), P(x, z, ry), 0, 0.3, -0.5));
+    this.lv.chargers.push({ x, z });
   }
   // 監視モニター卓
   monitor(x, z, ry, y = 0) {

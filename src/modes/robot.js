@@ -3,6 +3,8 @@ import { MAPS } from '../story/maps.js';
 import { buildMapLevel } from '../mapbuild.js';
 import { Npc } from '../npc.js';
 import { storage, fmtTime } from '../util.js';
+import { newGear } from '../game.js';
+import { Progress } from '../progress.js';
 
 const BEST_KEY = 'escape.robotBest';
 const NPC_COUNT = 4;
@@ -17,6 +19,7 @@ export class RobotMode {
   start() {
     const g = this.g, def = MAPS['1F'];
     Object.assign(g, { alarm: false, flashOn: false, time: 0, spotted: 0, decoyCd: 0, fear: 0 });
+    g.gear = newGear();
     const lv = buildMapLevel('1F', def, g.M, { power: true }, { mode: 'robot' });
     const dock = lv.docks[0] || lv.markers['@'];
     g.setLevel(lv, { x: dock.x, z: dock.z + 0.8, yaw: Math.PI });
@@ -133,6 +136,7 @@ export class RobotMode {
     document.exitPointerLock(); g.ui.showHud(false); g.ui.radar(false);
     let best = storage.get(BEST_KEY, null), isBest = false;
     if (win && (best == null || g.time < best)) { best = g.time; isBest = true; storage.set(BEST_KEY, best); }
+    if (win) { Progress.unlock('robot_win'); if (g.diffKey === 'hard') Progress.unlock('diff_hard'); }
     g.ui.overlay({
       title: win ? '本日の営業は終了しました' : 'お客様がお帰りになりました',
       body: win

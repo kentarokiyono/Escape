@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RX, RZ, FLOORS, ENTRY, EXIT_DOOR, KEY_POS, DOCK_XS, TOP_FLOOR } from './config.js';
 import { mulberry32 } from './util.js';
 import { Level, Builder, subtractRects, P, xform } from './level.js';
+import { makePuzzle } from './puzzles.js';
 
 const GRAFFITI = ['逃ゲロ', '帰レ', 'マダ営業中', '(o ω o)', '鍵ハ上', '見テル', '番号忘レルナ', 'オ席ヘ', '静カニ'];
 
@@ -411,11 +412,37 @@ function tryBuild(n, ctx, salt) {
   if (ctx.lock === 'code') {
     const spots = spotFor(2, Math.max(3, Math.floor(rows / 3)));
     if (spots.length < 2) { lv.valid = false; lv.why = 'memo'; }
-    for (const s of spots) b.memo(ctx.codes[n], n, s.x, s.z);
+    lv.puzzle = makePuzzle(ctx.codes[n], n, mulberry32((ctx.seed ^ Math.imul(n, 977)) >>> 0));
+    for (const s of spots) b.memo(lv.puzzle, s.x, s.z);
   } else if (ctx.lock === 'card' && !ctx.hasCard) {
     const spots = spotFor(1, 0);
     if (!spots.length) { lv.valid = false; lv.why = 'card'; }
     for (const s of spots) lv.card = b.item(s.x, s.z, 0, { look: 'card', id: 'card' + n, name: 'カードキー（' + n + 'F 階段）' });
+  }
+
+  // ---------- 装備・資料・充電ドック ----------
+  const taken = ctx.taken || new Set();
+  const gearAt = (id, o) => {
+    if (taken.has(id)) return;
+    const sp = spotFor(1, 0)[0];
+    if (sp) b.item(sp.x, sp.z, 0, { ...o, id });
+  };
+  if (n === 1 && !taken.has('remote')) {
+    // リモコンは 1F の開始地点の近く
+    for (let t = 0; t < 200; t++) {
+      const x = ENTRY.x + (R() * 2 - 1) * 9, z = ENTRY.z - 1 - R() * 9;
+      if (lv.groundAt(x, z) !== 0 || lv.phys.collide(x, z, 0.5) || !lv.nav.reachable(reach, x, z, 0)) continue;
+      b.item(x, z, 0, { look: 'remote', gear: 'remote', id: 'remote', name: '停止リモコン' });
+      break;
+    }
+  }
+  for (let k = 0; k < 2; k++) gearAt('f' + n + ':b' + k, { look: 'cell', gear: 'cell', name: '電池' });
+  for (let k = 0; k < 3; k++) gearAt('f' + n + ':g' + k, { look: 'plate', gear: 'throw', name: R() < 0.5 ? '割れていない皿' : '空き缶' });
+  if (n <= 3) gearAt('f' + n + ':q', { look: 'doc', gear: 'doc', docType: ['vision', 'hearing', 'battery'][n - 1], name: 'FR-002 技術資料' });
+  if (ctx.note != null) gearAt('f' + n + ':n', { look: 'paper', gear: 'note', note: ctx.note, name: '古いメモ' });
+  for (let k = 0; k < (n === TOP_FLOOR ? 1 : 3); k++) {
+    const sp = spotFor(1, 0)[0];
+    if (sp && lv.phys.boxFree(sp.x, sp.z, 0.6, 0.7)) { b.charger(sp.x, sp.z, 0); lv.phys.addBox(sp.x, sp.z - 0.5, 0.3, 0.1, 0.6); }
   }
 
   b.finish();

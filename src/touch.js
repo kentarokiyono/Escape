@@ -7,6 +7,8 @@ const BTNS = [
   ['crouch', 'しゃがむ', ''],
   ['flash', 'ライト', ''],
   ['map', 'マップ', ''],
+  ['throw', '投げる', ''],
+  ['remote', '停止', ''],
 ];
 
 export class TouchControls {
@@ -47,6 +49,7 @@ export class TouchControls {
     const g = this.g;
     if (el) el.classList.toggle('on', down && (act === 'dash'));
     if (act === 'dash') { g.keys.ShiftLeft = down; return; }
+    if (act === 'throw') { if (down) g.throws.start(); else g.throws.release(); el.classList.toggle('on', down); return; }
     if (!down) return;
     if (g.state === 'monitor') {
       if (act === 'prev') g.cycleMonitor(-1); else if (act === 'next') g.cycleMonitor(1); else if (act === 'back' || act === 'use') g.exitMonitor();
@@ -57,6 +60,7 @@ export class TouchControls {
       case 'crouch': g.keys.KeyC = !g.keys.KeyC; this.root.querySelector('[data-act=crouch]').classList.toggle('on', !!g.keys.KeyC); break;
       case 'flash': g.toggleFlash(); break;
       case 'map': g.toggleMap(); break;
+      case 'remote': g.useRemote(); break;
       case 'pause': if (g.state === 'play' || g.state === 'monitor') g.pause(); break;
     }
   }
