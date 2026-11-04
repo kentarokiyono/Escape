@@ -4,6 +4,9 @@ import { CHAPTERS, STORY_LIMIT, HINTS } from '../story/chapters.js';
 import { TEXT, DIARIES, DIARY_TITLE, ENDINGS } from '../story/text.js';
 import { buildMapLevel } from '../mapbuild.js';
 import { storage, fmtTime } from '../util.js';
+import { newGear } from '../game.js';
+import { Progress, judgeEscape } from '../progress.js';
+export const CHAPTER_KEY = 'escape.chapters';
 
 export const SAVE_KEY = 'escape.story';
 export const UNLOCK_KEY = 'escape.unlock';
@@ -20,8 +23,9 @@ export const DIARY_TOTAL = DIARY_INDEX.length;
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 export class StoryMode {
-  constructor(g, app, cont) {
-    this.g = g; this.app = app; this.cont = cont;
+  // cont: 「つづきから」 / practice: 章セレクトで遊ぶ章の id（保存・裏エンドなし）
+  constructor(g, app, cont, practice) {
+    this.g = g; this.app = app; this.cont = cont; this.practice = practice || null;
     this.timers = []; this.ended = false; this.saveT = 0;
   }
   static hasSave() { return !!storage.get(SAVE_KEY, null); }
@@ -29,10 +33,11 @@ export class StoryMode {
   start() {
     const g = this.g;
     Object.assign(g, { alarm: false, flashOn: true, time: 0, spotted: 0, decoyCd: 0, fear: 0 });
-    const save = this.cont ? storage.get(SAVE_KEY, null) : null;
-    if (save) { this.cp = save.cp; this.restore(save.time ?? save.cp.s.time, true); }
+    const save = this.practice ? { cp: storage.get(CHAPTER_KEY, {})[this.practice] } : this.cont ? storage.get(SAVE_KEY, null) : null;
+    if (save && save.cp) { this.cp = save.cp; this.restore(save.time ?? save.cp.s.time, true); }
     else {
-      this.s = { ch: 0, time: 0, inv: [], flags: [], diaries: [], maps: {}, hints: [] };
+      this.s = { ch: 0, time: 0, inv: [], flags: [], diaries: [], maps: {}, hints: [], gear: newGear(), hardcore: !!this.app.settings.hardcore };
+      g.gear = this.s.gear;
       this.mapId = null;
       this.startChapter(0);
     }
@@ -40,7 +45,7 @@ export class StoryMode {
   }
 
   get ch() { return CHAPTERS[this.s.ch]; }
-  ms(id) { return this.s.maps[id] || (this.s.maps[id] = { taken: [], doors: [], power: null, awake: [] }); }
+  ms(id) { return this.s.maps[id] || (this.s.maps[id] = { taken: [], doors: [], power: null, awake: [], dead: [], sys: null }); }
 
   // ---------- 章 ----------
   startChapter(i) {
@@ -52,20 +57,35 @@ export class StoryMode {
     this.objectiveText = ch.objective;
     this.spawnCfg = ch.spawn || null; this.spawnT = 0;
     this.g.ui.chapterCard(ch.no, ch.title);
+    this.chStart = { time: this.s.time, spotted: this.g.spotted };
     this.saveCheckpoint();
     if (ch.setup) ch.setup(this.api);
     if (ch.start) ch.start(this.api);
   }
-  next() { this.timers = []; this.startChapter(this.s.ch + 1); }
+  next() { this.timers = []; this.rankChapter(); this.startChapter(this.s.ch + 1); }
+  // 章ランク: 目安時間（par）と発見回数で S〜C
+  rankChapter() {
+    const ch = this.ch, st = this.chStart;
+    if (!st) return null;
+    const t = this.s.time - st.time, sp = this.g.spotted - st.spotted, par = ch.par || 240;
+    const rank = t <= par && sp === 0 ? 'S' : t <= par * 1.5 && sp <= 1 ? 'A' : sp <= 3 || t <= par * 2 ? 'B' : 'C';
+    Progress.rank(ch.id, rank, t);
+    this.g.ui.toast(ch.no + '「' + ch.title + '」ランク ' + rank + '（' + fmtTime(t) + '・発見 ' + sp + '回）');
+    return rank;
+  }
 
   saveCheckpoint() {
     const p = this.g.player;
     this.cp = { s: clone(this.s), map: this.mapId, pos: { x: p.x, z: p.z, yaw: p.yaw } };
+    if (this.practice) return;
     storage.set(SAVE_KEY, { cp: this.cp, time: this.s.time });
+    const chs = storage.get(CHAPTER_KEY, {}); chs[this.ch.id] = this.cp; storage.set(CHAPTER_KEY, chs);
   }
   restore(time, fromSave) {
     const g = this.g;
     this.s = clone(this.cp.s); this.s.time = time;
+    if (!this.s.gear) this.s.gear = newGear();
+    g.gear = this.s.gear;
     this.timers = []; this.ended = false;
     g.ui.clearSubtitles();
     g.flashOn = true;
@@ -74,6 +94,7 @@ export class StoryMode {
     this.objectiveText = ch.objective;
     this.spawnCfg = ch.spawn || null; this.spawnT = 0;
     g.ui.chapterCard(ch.no, ch.title);
+    this.chStart = { time: this.s.time, spotted: g.spotted };
     if (ch.setup) ch.setup(this.api);
     if (fromSave && ch.start) ch.start(this.api);
   }
@@ -84,6 +105,7 @@ export class StoryMode {
     this.mapId = id;
     const st = { taken: new Set(ms.taken), doors: new Set(ms.doors), power: ms.power ?? def.power };
     const lv = buildMapLevel(id, def, g.M, st, { mode: 'story' });
+    if (ms.sys) lv.sys = { ...ms.sys };
     let pos;
     if (at && typeof at === 'object') pos = at;
     else {
@@ -93,10 +115,16 @@ export class StoryMode {
     g.setLevel(lv, pos);
     const awake = new Set(ms.awake), all = awake.has('all');
     for (const sp of lv.spawns) {
-      const r = g.addRobot(sp.x, sp.z, { sleep: sp.sleep && !all && !awake.has(sp.id), heading: Math.random() * 6 });
+      const r = g.addRobot(sp.x, sp.z, { sleep: sp.sleep && !all && !awake.has(sp.id), heading: Math.random() * 6, sid: sp.id });
+      r.key = 'sp' + lv.spawns.indexOf(sp);
+      if ((ms.dead || []).includes(r.key)) r.enter('off');
       r.sid = sp.id || null;
     }
-    for (const d of lv.docks) { const r = g.addRobot(d.x, d.z, { sleep: !all && !awake.has('docks'), heading: 0 }); r.dock = true; }
+    lv.docks.forEach((d, i) => {
+      const r = g.addRobot(d.x, d.z, { sleep: !all && !awake.has('docks'), heading: 0, dock: true });
+      r.isDock = true; r.key = 'dk' + i;
+      if ((ms.dead || []).includes(r.key)) r.enter('off');
+    });
     g.ui.say(def.name, 3);
   }
 
@@ -132,7 +160,7 @@ export class StoryMode {
     let n = 0;
     for (const r of g.robots) {
       if (r.state !== 'sleep') continue;
-      if (!(id === 'all' || (id === 'docks' && r.dock) || r.sid === id)) continue;
+      if (!(id === 'all' || (id === 'docks' && r.isDock) || r.sid === id)) continue;
       if (n++ >= limit) break;
       const go = () => {
         if (r.state !== 'sleep' || !g.robots.includes(r)) return;
@@ -155,7 +183,7 @@ export class StoryMode {
     if (this.spawnCfg) {
       this.spawnT += dt * (g.player.hidden ? 3 : 1);
       const active = g.robots.filter((r) => r.state !== 'sleep').length;
-      if (this.spawnT > this.spawnCfg.interval && active < this.spawnCfg.max) { this.spawnT = 0; g.spawnRobotFar(14, false); }
+      if (this.spawnT > this.spawnCfg.interval * g.diff.spawn && active < this.spawnCfg.max) { this.spawnT = 0; g.spawnRobotFar(14, false); }
     }
     // 裏エンド: 累計時間
     for (const [t, k] of HINTS) {
@@ -164,7 +192,7 @@ export class StoryMode {
     const over = Math.max(0, (this.s.time - HINTS[0][0]) / (STORY_LIMIT - HINTS[0][0]));
     this.fearOverride = undefined;
     if (over > 0) g.fx.u.robo.value = Math.max(0, (over - 0.85) * 2); // 末期は視界が変質していく
-    if (this.s.time >= STORY_LIMIT) { this.uraEnd(); return; }
+    if (this.s.time >= STORY_LIMIT && !this.practice) { this.uraEnd(); return; }
     this.saveT += dt;
     if (this.saveT > 10) { this.saveT = 0; const sv = storage.get(SAVE_KEY, null); if (sv) { sv.time = this.s.time; storage.set(SAVE_KEY, sv); } }
   }
@@ -174,6 +202,7 @@ export class StoryMode {
   interactText(it) {
     switch (it.kind) {
       case 'item':
+        if (it.gear) return undefined;
         if (it.need && !this.has(it.need)) return it.name + '：外れない';
         if (it.diary) return '[E] 日誌の切れ端を拾う';
         if (it.id === 'fr_stop') return this.has('stopped') ? null : '[E] 停止スイッチを押す';
@@ -184,7 +213,7 @@ export class StoryMode {
       case 'lift':
         if (it.need && !this.has(it.need)) return it.label + '：止まっている';
         if (!it.to) return it.label + '：動かない';
-        if (!it.need && !this.g.level.power) return it.label + '：電源が落ちている';
+        if (!it.need && !this.g.sysOn('lift')) return it.label + '：' + (this.g.level.power ? 'リフトの系統が OFF（配電盤）' : '電源が落ちている');
         return '[E] ' + it.label + 'に乗る';
     }
     return undefined;
@@ -194,6 +223,7 @@ export class StoryMode {
     switch (it.kind) {
       case 'item': {
         const o = it.o;
+        if (o.gear) return false;
         if (o.need && !this.has(o.need)) { g.audio.locked(); const k = ch.locked && ch.locked[o.id]; if (k) g.ui.subtitles(TEXT[k]); return true; }
         if (!o.keep) { o.gone = true; o.mesh.visible = false; this.ms(this.mapId).taken.push(o.id); }
         if (o.diary) {
@@ -224,7 +254,7 @@ export class StoryMode {
   onLift(L) {
     const g = this.g;
     if (L.need && !this.has(L.need)) { g.audio.locked(); const k = this.ch.locked && this.ch.locked[L.id]; if (k) g.ui.subtitles(TEXT[k]); return; }
-    if (!L.to || (!L.need && !g.level.power)) { g.audio.locked(); g.ui.subtitles(TEXT.lift_dead); return; }
+    if (!L.to || (!L.need && !g.sysOn('lift'))) { g.audio.locked(); g.ui.subtitles(TEXT.lift_dead); return; }
     g.noiseAt(L.x, L.z, 18);
     const nx = CHAPTERS[this.s.ch + 1];
     g.transition(() => {
@@ -232,6 +262,9 @@ export class StoryMode {
       g.noiseAt(g.player.x, g.player.z, 16);
     }, 3200, () => g.audio.liftRide(3));
   }
+  onPickup(it) { if (it.id) this.ms(this.mapId).taken.push(it.id); }
+  onSys(sys) { this.ms(this.mapId).sys = { ...sys }; }
+  onRobotStopped(r) { if (r.key) { const ms = this.ms(this.mapId); ms.dead = ms.dead || []; ms.dead.push(r.key); } }
   onPower(on) {
     this.ms(this.mapId).power = on;
     if (typeof this.ch.power === 'function') this.ch.power(this.api, on);
@@ -259,11 +292,15 @@ export class StoryMode {
   // ---------- 終了 ----------
   gameOver() {
     const g = this.g;
+    if (this.s.hardcore && !this.practice) storage.set(SAVE_KEY, null);
     document.exitPointerLock(); g.ui.showHud(false);
     g.ui.overlay({
       title: 'お席へご案内いたしました',
-      body: '<p>' + this.ch.no + '「' + this.ch.title + '」の始めからやり直せます。</p>',
-      buttons: [
+      body: this.s.hardcore && !this.practice ? '<p>ハードコア: 序章からやり直し。</p>' : '<p>' + this.ch.no + '「' + this.ch.title + '」の始めからやり直せます。</p>',
+      buttons: this.s.hardcore && !this.practice ? [
+        { label: 'はじめから', primary: true, onClick: () => this.app.startStory(false) },
+        { label: 'タイトルへ', onClick: () => this.app.showTitle() },
+      ] : [
         { label: 'チェックポイントから再開', primary: true, onClick: () => { this.restore(this.s.time); g.begin(); } },
         { label: 'タイトルへ', onClick: () => this.app.showTitle() },
       ],
@@ -273,7 +310,13 @@ export class StoryMode {
   ending(kind) {
     const g = this.g, E = ENDINGS[kind];
     this.ended = true; g.state = 'win';
-    storage.set(SAVE_KEY, null);
+    const rank = this.rankChapter();
+    if (!this.practice) storage.set(SAVE_KEY, null);
+    Progress.unlock('ending_' + kind);
+    judgeEscape(g);
+    if (!this.practice && this.s.time < 1800) Progress.unlock('speed_story');
+    if (!this.practice && this.s.hardcore) Progress.unlock('hardcore');
+    void rank;
     const cleared = storage.get(UNLOCK_KEY, {});
     cleared[kind] = true; storage.set(UNLOCK_KEY, cleared);
     g.audio.unlock(); document.exitPointerLock(); g.ui.showHud(false); g.ui.clearSubtitles();
@@ -301,6 +344,7 @@ export class StoryMode {
       g.state = 'win';
       storage.set(SAVE_KEY, null);
       const un = storage.get(UNLOCK_KEY, {}); un.ura = true; un.robot = true; storage.set(UNLOCK_KEY, un);
+      Progress.unlock('ending_ura');
       document.exitPointerLock(); g.ui.showHud(false);
       const E = ENDINGS.ura;
       g.ui.overlay({
@@ -317,7 +361,7 @@ export class StoryMode {
       floor: this.ch.no + '「' + this.ch.title + '」<small>' + MAPS[this.mapId].name + '</small>',
       obj: '目標: <b>' + this.objectiveText + '</b>',
       code: '日誌 ' + this.s.diaries.length + ' / ' + DIARY_TOTAL + (this.s.inv.length ? '　所持: ' + this.s.inv.filter((i) => i !== 'stopped').map(itemName).join('・') : ''),
-      sub: 'ライト ' + (g.flashOn ? 'ON' : '<span class="warn">OFF</span>') + '　電源 ' + (g.level.power ? 'ON' : '<span class="warn">OFF</span>') +
+      sub: 'ライト ' + (g.flashOn ? 'ON' : '<span class="warn">OFF</span>') + '　電源 ' + (g.level.power ? g.load() + '/30A' : '<span class="warn">OFF</span>') +
         (p.crawl ? '　<span class="dim">ダクト内</span>' : p.crouch ? '　<span class="dim">しゃがみ</span>' : '') +
         (p.hidden ? '<br><span class="warn">隠れている…</span>' : ''),
       stamina: p.stamina, exhausted: p.exhausted,
@@ -328,7 +372,7 @@ export class StoryMode {
       body: '<p>ストーリー　' + this.ch.no + '「' + this.ch.title + '」　日誌 ' + this.s.diaries.length + '/' + DIARY_TOTAL + '</p><p class="dim">目標: ' + this.objectiveText + '</p>',
       buttons: [
         { label: 'チェックポイントからやり直す', onClick: () => { this.restore(this.s.time); this.g.begin(); } },
-        { label: 'タイトルへ（進行は章の始めから再開できます）', onClick: () => this.app.showTitle() },
+        { label: this.practice ? 'タイトルへ' : 'タイトルへ（進行は章の始めから再開できます）', onClick: () => this.app.showTitle() },
       ],
     };
   }

@@ -2,12 +2,16 @@
 import { ENTRY, KEY_POS, TOP_FLOOR, STORAGE_KEYS, FLOORS } from '../config.js';
 import { buildFreeLevel } from '../gen.js';
 import { mulberry32, storage, fmtTime } from '../util.js';
+import { newGear } from '../game.js';
+import { Progress, judgeEscape } from '../progress.js';
+import { PUZZLE_NAME } from '../puzzles.js';
 
 const LOCK_NAME = { code: '暗証番号（床の黄色いメモ）', power: 'シャッター（配電盤で電源を入れる）', card: 'カードキー（フロアのどこかに落ちている）' };
 
 export class FreeMode {
-  constructor(g, app, seed) {
-    this.g = g; this.app = app; this.seed = seed >>> 0;
+  // opts.daily: 今日の建物（日付文字列）
+  constructor(g, app, seed, opts = {}) {
+    this.g = g; this.app = app; this.seed = seed >>> 0; this.daily = opts.daily || null;
     this.best = storage.get(STORAGE_KEYS.best, null);
   }
   start() { this.newRun(); this.g.begin(); }
@@ -32,6 +36,10 @@ export class FreeMode {
     this.liftWorld = randPos();
     this.fs = {};
     this.hasKey = false;
+    g.gear = newGear();
+    // 図鑑のメモ: 未収集のものを優先して各階に1枚
+    const pool = [...Array(8).keys()].sort((a, b) => (Progress.dex.notes.includes(a) - Progress.dex.notes.includes(b)) || (R() - 0.5));
+    this.notes = { 1: pool[0], 2: pool[1], 3: pool[2], 4: pool[3], 5: pool[4] };
     Object.assign(g, { alarm: false, flashOn: true, time: 0, spotted: 0, decoyCd: 0, fear: 0 });
     g.player.reset(ENTRY.x, ENTRY.z, 0);
     this.loadFloor(1, null);
@@ -39,7 +47,7 @@ export class FreeMode {
   st(n) {
     return this.fs[n] || (this.fs[n] = {
       count: 1, interval: Math.max(25, 55 - 5 * n), max: 2 + n, timer: 0,
-      unlocked: false, known: false, alarm: false, hasCard: false, doorOpen: false,
+      unlocked: false, known: false, alarm: false, hasCard: false, doorOpen: false, taken: new Set(), sys: null,
       power: this.locks[n] !== 'power',
     });
   }
@@ -53,7 +61,10 @@ export class FreeMode {
     const lv = buildFreeLevel(n, {
       seed: this.seed, stairsWorld: this.stairsWorld, codes: this.codes, hasKey: this.hasKey, M: g.M,
       lock: n >= 2 && n < TOP_FLOOR ? this.locks[n] : null, power: st.power, lift, hasCard: st.hasCard,
+      taken: st.taken, note: this.notes[n],
     });
+    if (st.sys) lv.sys = { ...st.sys };
+    this.puzzle = lv.puzzle || null;
     let pos = { x: ENTRY.x, z: ENTRY.z, yaw: 0 };
     if (arr && arr.si !== undefined) pos = lv.arrival(arr.si, arr.dir);
     else if (arr && arr.lift && lv.lifts[0]) pos = { x: lv.lifts[0].x, z: lv.lifts[0].z, yaw: Math.PI };
@@ -78,13 +89,13 @@ export class FreeMode {
   update(dt) {
     const g = this.g, st = this.st(this.floor);
     st.timer += dt * (g.player.hidden ? 3 : 1);
-    if (st.count < st.max && st.timer >= st.interval) { st.timer = 0; st.count++; g.spawnRobotFar(15, false); }
+    if (st.count < st.max && st.timer >= st.interval * g.diff.spawn) { st.timer = 0; st.count++; g.spawnRobotFar(15, false); }
   }
 
   interactText(it) {
     switch (it.kind) {
       case 'exit': return this.hasKey ? '[E] マスターキーで脱出口を開ける' : '脱出口：施錠されている（マスターキーが必要）';
-      case 'item': return it.id === 'master' ? '[E] マスターキーを取る' : '[E] ' + it.name + 'を拾う';
+      case 'item': if (it.gear) return undefined; return it.id === 'master' ? '[E] マスターキーを取る' : '[E] ' + it.name + 'を拾う';
       case 'memo': return '[E] 落ちているメモを読む';
       case 'pad': {
         const tf = this.floor + it.dir;
@@ -109,13 +120,14 @@ export class FreeMode {
         if (this.hasKey) this.win(); else { g.audio.locked(); g.ui.say('鍵がかかっている。マスターキーは5Fにある'); }
         return true;
       case 'item':
+        if (it.o.gear) return false;
         it.o.gone = true; it.o.mesh.visible = false;
         if (it.id === 'master') this.takeKey();
         else { st.hasCard = true; g.audio.pickup(); g.ui.note('入手: ' + it.name); }
         return true;
       case 'memo':
         if (!st.known) { st.known = true; g.audio.pickup(); }
-        g.ui.showMemo(this.codes[this.floor], this.floor + 'F → ' + (this.floor + 1) + 'F 階段コード');
+        g.showDoc(it.o.puz.title, it.o.puz.body);
         return true;
       case 'pad': this.usePad(it.o); return true;
     }
@@ -126,7 +138,11 @@ export class FreeMode {
     const g = this.g, n = this.floor, st = this.st(n), lock = this.locks[n];
     if (pad.dir > 0 && lock) {
       if (lock === 'code' && !st.unlocked) {
-        g.openCode(n + 'F → ' + (n + 1) + 'F　暗証番号（テンキー / Enter / Esc）', (c) => c === this.codes[n], () => { st.unlocked = true; this.climb(pad); });
+        g.openCode(n + 'F → ' + (n + 1) + 'F　暗証番号（テンキー / Enter / Esc）', (c) => c === this.codes[n], () => {
+          st.unlocked = true;
+          if (this.puzzle) { Progress.add('code_' + this.puzzle.kind); if (['bin', 'receipt', 'hex'].every((k) => Progress.stats['code_' + k])) Progress.unlock('codes3'); }
+          this.climb(pad);
+        });
         return;
       }
       if (lock === 'power' && !pad.door.open) { g.audio.locked(); g.ui.say('シャッターが下りている。配電盤で電源を入れる必要がある'); return; }
@@ -143,6 +159,9 @@ export class FreeMode {
     g.transition(() => this.loadFloor(this.floor + pad.dir, { si: pad.si, dir: pad.dir }), 650, () => g.audio.stairs());
   }
 
+  onPickup(it) { this.st(this.floor).taken.add(it.id); }
+  onSys(sys) { this.st(this.floor).sys = { ...sys }; }
+  onRobotStopped() { const st = this.st(this.floor); st.count = Math.max(0, st.count - 1); st.max = Math.max(1, st.max - 1); }
   onPower(on) {
     const g = this.g;
     this.st(this.floor).power = on;
@@ -151,7 +170,7 @@ export class FreeMode {
   }
   onLift(L) {
     const g = this.g;
-    if (!g.level.power) { g.audio.locked(); g.ui.say('リフトは電源が落ちていて動かない'); return; }
+    if (!g.sysOn('lift')) { g.audio.locked(); g.ui.say(g.level.power ? 'リフトの系統が OFF。配電盤で電気を回す（定格 30A を超えないように）' : 'リフトは電源が落ちていて動かない'); return; }
     g.noiseAt(L.x, L.z, 18);
     g.transition(() => this.loadFloor(this.floor + L.dir, { lift: true }), 3200, () => g.audio.liftRide(3));
   }
@@ -180,15 +199,15 @@ export class FreeMode {
     const active = g.robots.filter((r) => r.state !== 'sleep').length;
     let code = '';
     if (lock && this.floor < TOP_FLOOR) {
-      if (lock === 'code') code = st.unlocked ? '上り階段: 解除済み' : '上り階段コード: ' + (st.known ? '<b class="code">' + this.codes[this.floor] + '</b>' : '<span class="warn">未発見（床の黄色いメモ）</span>');
-      else if (lock === 'power') code = '上り階段: ' + (g.level.power ? 'シャッター開放' : '<span class="warn">シャッター（配電盤で電源）</span>');
+      if (lock === 'code') code = st.unlocked ? '上り階段: 解除済み' : '上り階段コード: ' + (st.known && this.puzzle ? '<b class="code">' + this.puzzle.short + '</b>（' + PUZZLE_NAME[this.puzzle.kind] + '・解読して入力）' : '<span class="warn">未発見（床の黄色いメモ）</span>');
+      else if (lock === 'power') code = '上り階段: ' + (g.sysOn('shutter') ? 'シャッター開放' : '<span class="warn">シャッター（配電盤で電源とシャッター系統を ON）</span>');
       else code = '上り階段: ' + (st.hasCard ? 'カードキー所持' : '<span class="warn">カードキーが必要</span>');
     }
     return {
       floor: FLOORS[this.floor].name + '<small>' + fmtTime(g.time) + '</small>',
       obj: this.hasKey ? '目標: <b>1F の脱出口へ</b>' : '目標: <b>5F のマスターキーを取る</b>',
       code,
-      sub: '稼働スタッフ ' + active + '　ライト ' + (g.flashOn ? 'ON' : '<span class="warn">OFF</span>') + '　電源 ' + (g.level.power ? 'ON' : '<span class="warn">OFF</span>') +
+      sub: '稼働スタッフ ' + active + '　ライト ' + (g.flashOn ? 'ON' : '<span class="warn">OFF</span>') + '　電源 ' + (g.level.power ? g.load() + '/30A' : '<span class="warn">OFF</span>') +
         '　タブレット ' + (g.decoyCd > 0 ? Math.ceil(g.decoyCd) + 's' : '可') +
         (p.crawl ? '　<span class="dim">ダクト内</span>' : p.crouch ? '　<span class="dim">しゃがみ</span>' : '') +
         (p.hidden ? '<br><span class="warn">隠れている…増援が3倍速で迫る</span>' : ''),
@@ -206,7 +225,7 @@ export class FreeMode {
   }
   endButtons() {
     return [
-      { label: '同じ建物で再挑戦', primary: true, onClick: () => this.app.startFree(this.seed) },
+      { label: '同じ建物で再挑戦', primary: true, onClick: () => this.daily ? this.app.startDaily() : this.app.startFree(this.seed) },
       { label: '新しい建物で挑戦', onClick: () => this.app.startFree(null) },
       { label: 'タイトルへ', onClick: () => this.app.showTitle() },
     ];
@@ -221,12 +240,21 @@ export class FreeMode {
     g.state = 'win';
     const isBest = this.best == null || g.time < this.best;
     if (isBest) { this.best = g.time; storage.set(STORAGE_KEYS.best, g.time); }
+    judgeEscape(g, { free: true });
+    if (g.time < 480) Progress.unlock('speed_free');
+    let dailyBest = false;
+    if (this.daily) { Progress.unlock('daily'); dailyBest = Progress.dailyResult(this.daily, g.time); }
     g.audio.unlock(); document.exitPointerLock(); g.ui.showHud(false);
-    g.ui.overlay({ title: 'ビルから抜け出した…', body: '<p>しかし駐車場にも、小さな白い影が並んでいた</p>' + this.statsHtml() + (isBest ? '<p class="best">ベストタイム更新</p>' : ''), buttons: this.endButtons(), settings: true });
+    g.ui.overlay({
+      title: 'ビルから抜け出した…',
+      body: '<p>しかし駐車場にも、小さな白い影が並んでいた</p>' + this.statsHtml() + (isBest ? '<p class="best">ベストタイム更新</p>' : '') +
+        (this.daily ? '<p class="best">今日の建物（' + this.daily + '）' + (dailyBest ? 'の記録を更新' : 'の記録 ' + fmtTime(Progress.daily[this.daily])) + '</p>' : ''),
+      buttons: this.endButtons(), settings: true,
+    });
   }
   pauseInfo() {
     return {
-      body: '<p>フリーモード　' + FLOORS[this.floor].name + '　経過 ' + fmtTime(this.g.time) + '</p>',
+      body: '<p>' + (this.daily ? '今日の建物（' + this.daily + '）' : 'フリーモード') + '　' + FLOORS[this.floor].name + '　経過 ' + fmtTime(this.g.time) + '</p>',
       buttons: [{ label: '最初からやり直す', onClick: () => this.app.startFree(this.seed) }, { label: 'タイトルへ', onClick: () => this.app.showTitle() }],
     };
   }

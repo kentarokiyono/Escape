@@ -1,7 +1,11 @@
 // ゲームのコア: 描画・プレイヤー・ロボット・照明/電源・扉・監視カメラ・インタラクション・状態遷移
 // モード固有の進行（フリー/ストーリー/ロボット）は this.mode に委譲する
 import * as THREE from 'three';
-import { DECOY_CD, DECOY_RANGE } from './config.js';
+import { DECOY_CD, DECOY_RANGE, DIFFICULTY, LOADS, SYS_NAMES, CAPACITY, ROBOT_TYPES } from './config.js';
+import { Sensors } from './sensors.js';
+import { Throwables } from './throwable.js';
+import { Progress, newRun } from './progress.js';
+import { DOCS, NOTES } from './story/text.js';
 import { buildMaterials, faceTextures, flashCookie } from './textures.js';
 import { Robot, initRobotAssets } from './robot.js';
 import { Player } from './player.js';
@@ -9,6 +13,8 @@ import { drawMap } from './minimap.js';
 import { damp, clamp, angDiff } from './util.js';
 
 const DUST_N = 500;
+// 装備: リモコン・その電池・投げられる物・読んだ技術資料
+export const newGear = () => ({ remote: false, cells: 0, throws: 0, docs: [] });
 const _off = new THREE.Vector3(), _fwd = new THREE.Vector3();
 
 export class Game {
@@ -49,6 +55,9 @@ export class Game {
     this.codeInput = []; this.codeCtx = null;
     this.time = 0; this.clock = 0; this.spotted = 0;
     this.monIdx = 0; this.doc = null;
+    this.gear = newGear(); this.run = newRun(); this.diff = DIFFICULTY.normal; this.diffKey = 'normal';
+    this.sensors = new Sensors(this); this.throws = new Throwables(this);
+    Progress.ui = ui; Progress.audio = audio;
     this.ui.code.onDigit = (d) => this.codeDigit(d);
     this.ui.code.onDel = () => this.codeDel();
     this.ui.code.onOk = () => this.codeSubmit(true);
@@ -112,6 +121,7 @@ export class Game {
     if (this.level) { this.scene.remove(this.level.group); this.level.dispose(); }
     this.clearActors();
     this.level = lv; this.scene.add(lv.group);
+    this.throws.clear();
     const y = pos.y ?? lv.groundAt(pos.x, pos.z);
     this.player.place(pos.x, pos.z, pos.yaw ?? 0, Math.max(0, y));
     this.ui.setHidden(false); this.audio.setMuffled(false);
@@ -147,25 +157,88 @@ export class Game {
   onSpotted(r) { this.spotted++; this.audio.jingle(r.x, r.z, true); }
   // 物音: 範囲内の平静なロボットが調べに来る
   noiseAt(x, z, radius) {
+    let n = 0;
     for (const r of this.robots) {
       if (r.state !== 'patrol' && r.state !== 'search' && r.state !== 'lure') continue;
-      if (Math.hypot(r.x - x, r.z - z) < radius) r.enter('search', { x, z });
+      if (Math.hypot(r.x - x, r.z - z) < radius) { r.enter('search', { x, z }); n++; }
     }
+    return n;
   }
 
   // ---------- 電源 ----------
+  // 系統が使えるか（主電源 ON かつ配電盤でその系統が ON）
+  sysOn(k) { const lv = this.level; return !!(lv && lv.power && lv.sys[k]); }
+  load() { const lv = this.level; return Object.keys(LOADS).reduce((a, k) => a + (lv.sys[k] ? LOADS[k] : 0), 0); }
   applyPower(on, instant) {
     const lv = this.level;
     lv.power = on;
-    for (const d of lv.doors) if (d.power) { if (on) this.openDoor(d, instant, true); else this.closeDoor(d, instant); }
     if (lv.breaker) {
       lv.breaker.on = on;
       lv.breaker.led.material.color.copy(on ? this.M.ledGreen.color : this.M.ledRed.color);
       lv.breaker.lever.rotation.x = on ? -0.6 : 0.6;
     }
-    for (const L of lv.lifts) L.panelMat.color.copy(on ? this.M.ledGreen.color : this.M.ledRed.color);
-    for (const c of lv.cameras) { if (!on) c.ledMat.color.setScalar(0.05); else if (!instant) { c.cd = 8; c.spotT = 0; } } // 電源投入直後のカメラは起動待ち
+    this.applySystems(instant, true);
+  }
+  applySystems(instant, boot) {
+    const lv = this.level;
+    for (const d of lv.doors) if (d.power) { if (this.sysOn('shutter')) this.openDoor(d, instant, true); else this.closeDoor(d, instant); }
+    for (const L of lv.lifts) L.panelMat.color.copy(this.sysOn('lift') ? this.M.ledGreen.color : this.M.ledRed.color);
+    // 電源投入直後のカメラは起動待ち
+    for (const c of lv.cameras) { if (!this.sysOn('camera')) c.ledMat.color.setScalar(0.05); else if (!instant && boot !== false) { c.cd = 8; c.spotT = 0; } }
     if (!instant) lv.refresh();
+  }
+
+  // ---------- 配電盤パネル ----------
+  openPanel(b) {
+    this.state = 'panel'; this.panelB = b;
+    this.ui.prompt(''); document.exitPointerLock();
+    this.throws.cancel();
+    this.renderPanel();
+  }
+  renderPanel(msg) {
+    const lv = this.level;
+    this.ui.panel({
+      power: lv.power, locked: !lv.power && this.panelB.need && !this.mode.has(this.panelB.need),
+      sys: Object.keys(LOADS).map((k) => ({ k, name: SYS_NAMES[k], amp: LOADS[k], on: !!lv.sys[k] })),
+      load: this.load(), cap: CAPACITY, msg,
+    }, {
+      main: () => this.panelMain(), toggle: (k) => this.panelToggle(k), close: () => this.closePanel(true),
+    });
+  }
+  panelMain() {
+    const b = this.panelB, lv = this.level;
+    if (!lv.power && b.need && !this.mode.has(b.need)) { this.audio.locked(); this.renderPanel('主電源のスイッチに鍵がかかっている'); return; }
+    if (!lv.power && this.load() > CAPACITY) { this.trip(); return; }
+    this.audio.breaker(b.x, b.z);
+    this.applyPower(!lv.power);
+    this.noiseAt(b.x, b.z, this.mode.breakerNoise ?? 12);
+    if (this.mode.onPower) this.mode.onPower(lv.power, b);
+    this.renderPanel();
+  }
+  panelToggle(k) {
+    const lv = this.level;
+    lv.sys[k] = !lv.sys[k];
+    this.audio.click();
+    if (this.mode.onSys) this.mode.onSys(lv.sys);
+    if (lv.power && this.load() > CAPACITY) { this.trip(); return; }
+    this.applySystems(false, lv.sys[k]);
+    this.renderPanel();
+  }
+  // 過電流: 主電源が落ちる
+  trip() {
+    const b = this.panelB;
+    this.audio.trip(b.x, b.z);
+    this.applyPower(false);
+    this.noiseAt(b.x, b.z, 14);
+    if (this.mode.onPower) this.mode.onPower(false, b);
+    Progress.unlock('trip');
+    this.renderPanel('過電流でブレーカーが落ちた（' + this.load() + 'A ＞ ' + CAPACITY + 'A）。系統を減らしてから主電源を入れ直す');
+  }
+  closePanel(gesture) {
+    if (this.state !== 'panel') return;
+    this.ui.panel(null);
+    this.state = 'play';
+    if (gesture) this.requestLock(); else this.pause();
   }
 
   // ---------- 扉 ----------
@@ -199,7 +272,7 @@ export class Game {
   // ---------- 監視カメラ ----------
   updateCameras(dt) {
     const lv = this.level, p = this.player;
-    if (!lv.power || this.mode.camerasOff) return;
+    if (!this.sysOn('camera') || this.mode.camerasOff) return;
     for (const c of lv.cameras) {
       c.phase += dt * 0.35;
       c.yaw = c.yaw0 + Math.sin(c.phase) * c.sweep;
@@ -221,7 +294,7 @@ export class Game {
         c.cd = 12; c.spotT = 0;
         this.audio.pa();
         this.ui.say('【館内放送】' + c.name + ' にてお客様をお見かけしました。スタッフがご案内に伺います');
-        const near = this.robots.filter((r) => r.state !== 'sleep' && r.state !== 'chase' && r.state !== 'caught')
+        const near = this.robots.filter((r) => (r.state === 'patrol' || r.state === 'search' || r.state === 'lure'))
           .sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z)).slice(0, 2);
         for (const r of near) r.enter('search', { x: p.x, z: p.z });
       }
@@ -232,11 +305,12 @@ export class Game {
   frame(dt) {
     this.clock += dt;
     const s = this.state;
-    if (s === 'play' || s === 'code' || s === 'monitor') this.update(dt);
+    if (s === 'play' || s === 'code' || s === 'monitor' || s === 'panel') this.update(dt);
     else if (s === 'dying') this.updateDying(dt);
     if (this.level) {
       if (s === 'monitor') this.updateMonitorCam(dt); else this.updateCamera(dt);
-      if (s === 'play' || s === 'code' || s === 'dying' || s === 'trans' || s === 'monitor') this.audio.update(dt, this.player);
+      if (s === 'play' || s === 'code' || s === 'dying' || s === 'trans' || s === 'monitor' || s === 'panel') this.audio.update(dt, this.player);
+      this.sensors.update();
       this.audio.listen(this.camera);
     }
     this.fx.u.fear.value = this.fear;
@@ -255,6 +329,8 @@ export class Game {
     for (const it of lv.interacts) if (it.spin && it.mesh) { it.mesh.rotation.y += dt * 1.5; }
     for (const r of this.robots) { r.update(dt); if (this.state === 'dying') break; }
     for (const n of this.npcs) n.update(dt);
+    this.throws.update(dt);
+    if (this.flashOn && !p.hidden) this.run.lightTime += dt;
     this.updateDoors(dt);
     this.updateCameras(dt);
     for (const t of lv.triggers || []) {
@@ -263,7 +339,7 @@ export class Game {
 
     let nearest = 99, chasing = false;
     for (const r of this.robots) {
-      if (r.state === 'sleep') continue;
+      if (r.state === 'sleep' || r.state === 'off' || r.state === 'dead' || r.state === 'charge') continue;
       nearest = Math.min(nearest, Math.hypot(r.x - p.x, r.z - p.z));
       if (r.state === 'chase' || r.state === 'alert' || r.state === 'inspect') chasing = true;
     }
@@ -276,7 +352,7 @@ export class Game {
   }
 
   updateLights(dt) {
-    const lv = this.level, p = this.player, spots = lv.lightSpots, on = lv.power;
+    const lv = this.level, p = this.player, spots = lv.lightSpots, on = this.sysOn('light');
     for (const s of spots) {
       let v;
       if (!on) v = 0;
@@ -361,7 +437,7 @@ export class Game {
   enterMonitor() {
     const cams = this.level.cameras;
     if (!cams.length) return;
-    if (!this.level.power) { this.ui.say('モニターは電源が落ちている'); this.audio.error(); return; }
+    if (!this.sysOn('camera')) { this.ui.say('監視カメラの系統に電気が来ていない（配電盤）'); this.audio.error(); return; }
     this.state = 'monitor'; this.monIdx = 0;
     this.fx.setCamera(this.monCam); this.fx.u.mon.value = 1;
     this.audio.click();
@@ -401,6 +477,12 @@ export class Game {
       if (dd < (it.r || 1.3)) consider(it, dd - (it.kind === 'item' ? 0.3 : 0));
     }
     for (const s of lv.pads) { const dd = d(s.x, s.z); if (dd < 1.5) consider(s, dd, 'pad'); }
+    // 停止したロボットの型番プレート
+    if (!p.robot) for (const r of this.robots) {
+      if ((r.state !== 'off' && r.state !== 'dead') || r.plateTaken) continue;
+      const dd = d(r.x, r.z);
+      if (dd < 1.5 && dd + 0.1 < bd) { bd = dd + 0.1; best = { kind: 'plate', o: r, x: r.x, z: r.z }; }
+    }
     if (!p.robot) {
       for (const l of lv.lockers) {
         if (Math.abs(l.y - p.gy) > 0.5) continue;
@@ -419,7 +501,9 @@ export class Game {
     switch (it.kind) {
       case 'hide': return '[E] ロッカーに隠れる';
       case 'tablet': return this.decoyCd > 0 ? 'タブレット充電中 ' + Math.ceil(this.decoyCd) + 's' : '[E] ' + it.name + 'から呼び出し（囮）';
-      case 'breaker': return this.level.power ? '[E] 配電盤：電源を切る' : (it.need && !this.mode.has(it.need) ? '配電盤：施錠されている（鍵が必要）' : '[E] 配電盤：ブレーカーを上げる');
+      case 'breaker': return '[E] 配電盤を開く（' + (this.level.power ? '通電中 ' + this.load() + '/' + CAPACITY + 'A' : '停電中') + '）';
+      case 'plate': return '[E] 停止したロボットの型番プレートを外す';
+      case 'item': return it.gear ? '[E] ' + it.name + 'を拾う' : null;
       case 'door': {
         const dd = it.door;
         if (dd.open) return null;
@@ -430,7 +514,7 @@ export class Game {
       }
       case 'shutter': return it.door.open ? null : 'シャッター：電源が落ちていて動かない';
       case 'monitor': return '[E] 監視モニターを見る';
-      case 'lift': return '[E] ' + it.label + 'に乗る';
+      case 'lift': return !it.need && !this.sysOn('lift') ? it.label + '：' + (this.level.power ? 'リフトの系統が OFF（配電盤で ON に）' : '電源が落ちている') : '[E] ' + it.label + 'に乗る';
       case 'openLocker': return '[E] ロッカーを開ける';
       default: return null;
     }
@@ -452,15 +536,9 @@ export class Game {
       case 'unhide': this.unhide(); break;
       case 'hide': this.hide(it.o); break;
       case 'tablet': if (this.decoyCd <= 0) this.useDecoy(it.o); else this.audio.error(); break;
-      case 'breaker': {
-        const b = it.o;
-        if (!this.level.power && b.need && !this.mode.has(b.need)) { this.audio.locked(); break; }
-        this.audio.breaker(b.x, b.z);
-        this.applyPower(!this.level.power);
-        this.noiseAt(b.x, b.z, this.mode.breakerNoise ?? 12);
-        if (this.mode.onPower) this.mode.onPower(this.level.power, b);
-        break;
-      }
+      case 'breaker': this.openPanel(it.o); break;
+      case 'plate': this.takePlate(it.o); break;
+      case 'item': if (it.o.gear) this.pickupGear(it.o); break;
       case 'door': {
         const d = it.door;
         if (d.thumb && this.thumbSide(d)) { this.openDoor(d); this.mode.onDoorOpen?.(d); }
@@ -476,7 +554,7 @@ export class Game {
 
   hide(L) {
     const p = this.player;
-    p.hidden = true; p.locker = L;
+    p.hidden = true; p.locker = L; this.run.lockers++;
     p.x = L.x + L.fx * 0.12; p.z = L.z + L.fz * 0.12; p.gy = L.y;
     p.yawCenter = Math.atan2(-L.fx, -L.fz); p.yaw = p.yawCenter; p.pitch = 0;
     this.audio.locker(true); this.audio.setMuffled(true); this.ui.setHidden(true);
@@ -503,6 +581,64 @@ export class Game {
       if (Math.hypot(r.x - t.x, r.z - t.z) > DECOY_RANGE) continue;
       r.enter('lure', t);
     }
+  }
+
+  // ---------- 装備 ----------
+  pickupGear(it) {
+    const G = this.gear;
+    if (it.gear === 'throw' && G.throws >= 3) { this.ui.say('これ以上持てない（投げられる物は3つまで）'); return; }
+    it.gone = true; it.mesh.visible = false;
+    this.audio.pickup();
+    if (it.gear === 'cell') { G.cells++; this.ui.note('入手: 電池（リモコン用）'); }
+    else if (it.gear === 'throw') { G.throws++; this.ui.note('入手: ' + it.name + '（G 長押しで投げる）'); }
+    else if (it.gear === 'remote') {
+      G.remote = true; G.cells += 2;
+      this.showDoc('停止リモコン（整備用）', 'ロボットに停止信号を送る整備用リモコン。\n\n・正面からでも、7m 以内で狙ったロボット1台を止められる\n・1回ごとに電池を1本使う（電池は館内に落ちている）\n・止めたロボットは二度と動かない\n\n操作: R キー（スマホは「停止」ボタン）。画面中央にロボットを合わせて使う');
+    } else if (it.gear === 'doc') {
+      if (!G.docs.includes(it.docType)) G.docs.push(it.docType);
+      const D = DOCS[it.docType];
+      this.showDoc(D.title, D.body);
+      if (['vision', 'hearing', 'battery'].every((k) => G.docs.includes(k))) Progress.unlock('docs3');
+    } else if (it.gear === 'note') {
+      const n = NOTES[it.note], isNew = Progress.dexAdd('notes', it.note);
+      this.showDoc(n.title + (isNew ? '（図鑑に登録）' : ''), n.body);
+    }
+    if (this.mode.onPickup) this.mode.onPickup(it);
+  }
+  takePlate(r) {
+    r.plateTaken = true;
+    const T = ROBOT_TYPES[r.type], isNew = Progress.dexAdd('robots', r.type);
+    this.audio.pickup();
+    this.showDoc('型番プレート：' + T.name + (isNew ? '（図鑑に登録）' : ''),
+      T.desc + '\n\n移動速度 ×' + T.speed + '　視覚センサー ×' + T.sight + '\nバッテリー容量 ' + T.battery + '　消費 ×' + T.drain);
+  }
+  // リモコン: 画面中央の先にいる近くのロボット1台を永久に止める
+  useRemote() {
+    const p = this.player, G = this.gear;
+    if (this.state !== 'play' || p.hidden || p.robot) return;
+    if (!G.remote) { this.ui.say('停止リモコンを持っていない'); return; }
+    if (G.cells <= 0) { this.audio.error(); this.ui.say('リモコンの電池がない'); return; }
+    let best = null, bd = 99;
+    for (const r of this.robots) {
+      if (r.state === 'off' || r.state === 'dead' || r.state === 'caught') continue;
+      const d = Math.hypot(r.x - p.x, r.z - p.z);
+      if (d > 7 || p.facingDot(r.x, r.z) < 0.93) continue;
+      if (!this.level.phys.los(p.x, p.eyeY, p.z, r.x, r.gy + 1.0, r.z)) continue;
+      if (d < bd) { bd = d; best = r; }
+    }
+    if (!best) { this.audio.click(); this.ui.say('画面中央の先 7m 以内にロボットがいない'); return; }
+    G.cells--;
+    this.audio.zap(best.x, best.z);
+    best.enter('off');
+    this.onRobotStopped(best, 'remote');
+  }
+  onRobotStopped(r, why) {
+    if (why === 'drain') {
+      this.audio.powerDown(r.x, r.z);
+      if (Math.hypot(r.x - this.player.x, r.z - this.player.z) < 25) this.ui.say('ロボットの電池が切れて止まった');
+      Progress.add('drains');
+    } else { this.ui.say('ロボットを停止させた（電池 残り' + this.gear.cells + '本）'); Progress.add('stops'); }
+    if (this.mode.onRobotStopped) this.mode.onRobotStopped(r, why);
   }
 
   showDoc(title, body) {
@@ -574,7 +710,9 @@ export class Game {
     if (this.state === 'dying' || this.state === 'over' || this.state === 'trans') return;
     if (this.mode.onCaught && this.mode.onCaught(r)) return;
     if (this.state === 'code') this.ui.closeCode();
+    if (this.state === 'panel') this.ui.panel(null);
     if (this.state === 'monitor') this.exitMonitor();
+    this.throws.cancel();
     this.closeDoc();
     this.state = 'dying'; this.dyingT = 0; this.killer = r;
     r.enter('caught');
@@ -632,6 +770,7 @@ export class Game {
     if (this.audio.ctx && this.audio.ctx.state === 'suspended') this.audio.ctx.resume();
   }
   pause() {
+    this.throws.cancel();
     if (this.touch) { this.touchActive = false; for (const k in this.keys) this.keys[k] = false; }
     if (this.state === 'monitor') { this.fx.setCamera(this.camera); this.fx.u.mon.value = 0; this.ui.monitor(null); }
     this.state = 'pause';
@@ -665,6 +804,13 @@ export class Game {
   updateHud() {
     const it = this.state === 'play' ? this.findInteract() : null;
     this.ui.prompt(it ? it.text : '');
-    this.ui.hud(this.mode.hud());
+    const h = this.mode.hud(), G = this.gear, gear = [];
+    if (!this.player.robot) {
+      if (G.remote) gear.push('リモコン 電池' + G.cells);
+      if (G.throws) gear.push('投げ物 ' + G.throws);
+      if (G.docs.length) gear.push('技術資料 ' + G.docs.length + '/3' + (this.sensors.on ? '' : '（V で表示）'));
+    }
+    if (gear.length) h.sub += '<br>' + gear.join('　');
+    this.ui.hud(h);
   }
 }

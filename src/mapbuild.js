@@ -222,6 +222,17 @@ export function buildMapLevel(id, def, M, st, opts = {}) {
     if (ch === '@') lv.markers['@'] = { x, z, y, yaw: def.startFace ? Math.atan2(-(X(def.startFace[0]) - x), -(Z(def.startFace[1]) - z)) : undefined }; // 出入口の方を向く
     else if (ch === 'r') lv.spawns.push({ x, z, sleep: false });
     else if (ch === 'z') lv.docks.push({ x, z });
+    else if (ch === 'y') b.charger(x, z, awayRy(c, r));
+    else if ('bgqn'.includes(ch) && opts.mode !== 'robot') {
+      // 拾える装備・資料（ストーリーでは拾ったものを保存）
+      const iid = id + ':' + ch + ':' + c + ',' + r;
+      if (st.taken && st.taken.has(iid)) continue;
+      const qi = (def.docs || []), ni = (def.notes || []);
+      if (ch === 'b') b.item(x, z, y, { look: 'cell', gear: 'cell', id: iid, name: '電池' });
+      else if (ch === 'g') b.item(x, z, y, { look: 'plate', gear: 'throw', id: iid, name: R() < 0.5 ? '割れていない皿' : '空き缶' });
+      else if (ch === 'q') b.item(x, z, y, { look: 'doc', gear: 'doc', id: iid, docType: qi[(lv.qn = (lv.qn || 0) + 1) - 1] || 'vision', name: 'FR-002 技術資料' });
+      else b.item(x, z, y, { look: 'paper', gear: 'note', id: iid, note: ni[(lv.nn = (lv.nn || 0) + 1) - 1] ?? 0, name: '古いメモ' });
+    }
     else if (ch === 'a') lv.npcSpawns.push({ x, z });
     else if (ch === 'k') { if (opts.mode === 'robot') lv.keySpots.push(b.item(x, z, y, { look: 'key', flat: true, id: 'npckey', name: '鍵' })); }
     else if (ch === 'j') {

@@ -15,6 +15,39 @@ export class UI {
   }
   _set(key, el, html) { if (this.cache[key] !== html) { this.cache[key] = html; el.innerHTML = html; } }
 
+  toast(text) {
+    const t = document.getElementById('toast');
+    t.textContent = text; t.classList.add('on');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => t.classList.remove('on'), 3500);
+  }
+  // 配電盤パネル。d=null で閉じる
+  panel(d, h) {
+    const el = document.getElementById('panel');
+    if (!d) { el.classList.add('hide'); return; }
+    el.classList.remove('hide');
+    document.getElementById('pCap').textContent = d.cap;
+    const main = document.getElementById('pMain');
+    main.textContent = '主電源： ' + (d.power ? 'ON（押すと切る）' : d.locked ? 'OFF（鍵がかかっている）' : 'OFF（押すと入れる）');
+    main.className = d.power ? 'on' : d.locked ? 'locked' : '';
+    main.onclick = (e) => { e.stopPropagation(); h.main(); };
+    const rows = document.getElementById('pRows');
+    rows.innerHTML = '';
+    for (const s of d.sys) {
+      const b = document.createElement('button');
+      b.className = s.on ? 'on' : '';
+      b.innerHTML = s.name + '　' + (s.on ? 'ON' : 'OFF') + '<span>' + s.amp + 'A（' + s.amp * 100 + 'W）</span>';
+      b.onclick = (e) => { e.stopPropagation(); h.toggle(s.k); };
+      rows.appendChild(b);
+    }
+    const m = document.getElementById('pMeter');
+    m.classList.toggle('over', d.load > d.cap);
+    m.querySelector('i').style.width = Math.min(100, (d.load / d.cap) * 100) + '%';
+    m.querySelector('span').textContent = '合計 ' + d.load + 'A / ' + d.cap + 'A' + (d.power ? '' : '（停電中）');
+    document.getElementById('pMsg').textContent = d.msg || '';
+    const c = document.getElementById('pClose');
+    c.onclick = (e) => { e.stopPropagation(); h.close(); };
+  }
   loading(text) {
     this.e.loading.textContent = text || '';
     this.e.loading.classList.toggle('hide', !text);

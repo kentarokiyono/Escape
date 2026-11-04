@@ -376,15 +376,17 @@ export function graffitiTexture(txt, R) {
   return tex(c, true, false);
 }
 
-export function memoTexture(code, n) {
+// head: 見出し / text: 大きく書く内容（長ければ小さく）
+export function memoTexture(head, text, seed = 1) {
   const c = canvas(256, 180), g = c.getContext('2d');
   g.fillStyle = '#d6c35e'; g.fillRect(0, 0, 256, 180);
-  const R = mulberry32(Number(code) + n);
+  const R = mulberry32(seed);
   for (let i = 0; i < 400; i++) { g.fillStyle = 'rgba(80,70,20,' + R() * 0.15 + ')'; g.fillRect(R() * 256, R() * 180, 1 + R() * 3, 1 + R() * 3); }
   g.strokeStyle = 'rgba(90,80,30,0.35)'; g.beginPath(); g.moveTo(0, 90 + R() * 10); g.lineTo(256, 85 + R() * 10); g.stroke();
   g.fillStyle = '#222'; g.textAlign = 'center';
-  g.font = '16px sans-serif'; g.fillText(n + 'F → ' + (n + 1) + 'F 階段コード', 128, 32);
-  g.save(); g.translate(128, 105); g.rotate(-0.04); g.font = 'bold 58px monospace'; g.fillText(code, 0, 0); g.restore();
+  g.font = '15px sans-serif'; g.fillText(head, 128, 32);
+  const size = text.length <= 4 ? 58 : text.length <= 8 ? 34 : 22;
+  g.save(); g.translate(128, 100); g.rotate(-0.04); g.font = 'bold ' + size + 'px monospace'; g.fillText(text, 0, 0); g.restore();
   g.font = '12px sans-serif'; g.fillStyle = '#5a4f20'; g.fillText('※忘れるな', 128, 160);
   return tex(c, true, false);
 }
